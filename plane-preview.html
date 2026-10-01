@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>龙马位移预览（无摄像头·桌面可测）</title>
+  <script src="./libs/aframe.min.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0e1418; font-family: system-ui, "Microsoft YaHei", sans-serif; }
+    #panel { position: fixed; top: 8px; left: 8px; z-index: 9999; background: rgba(0,0,0,.6); color: #eee; padding: 8px 10px; border-radius: 10px; font-size: 12px; }
+    #panel label { display: block; margin: 4px 0; }
+    #panel input[type=range] { width: 130px; vertical-align: middle; }
+    #tip { position: fixed; bottom: 10px; left: 10px; right: 10px; z-index: 9999; font-size: 13px; color: #9fe870; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div id="panel">
+    <label>缩放 <input id="sScale" type="range" min="0.02" max="0.3" step="0.005" value="0.08"></label>
+    <label>速度 <input id="sSpeed" type="range" min="0.2" max="4" step="0.1" value="1.2"></label>
+    <label>朝向偏移° <input id="sHead" type="range" min="0" max="360" step="15" value="0"></label>
+  </div>
+  <div id="tip">鼠标点桌面（绿色网格）任意处，龙马会平滑走过去、头朝行进方向。可拖拽转视角。</div>
+
+  <a-scene background="color: #0e1418">
+    <a-entity id="cam" camera look-controls orbit-controls="target: 0 0 0; enableDamping: true; dampingFactor: 0.12; minDistance: 1; maxDistance: 12" position="0 3 5"></a-entity>
+    <a-light type="ambient" intensity="0.7"></a-light>
+    <a-light type="directional" position="2 5 3" intensity="0.9"></a-light>
+    <!-- 桌面：可点击的网格地面 -->
+    <a-plane id="ground" rotation="-90 0 0" width="10" height="10" color="#1f6f43" opacity="0.9"
+             material="shader: flat"></a-plane>
+    <a-entity grid-helper="cellColor: #ffffff; sectionColor: #cfe8d6; cellSize: 0.5; sectionSize: 2; fadeDistance: 14" position="0 0.01 0"></a-entity>
+    <!-- 龙马 -->
+    <a-entity id="horse" gltf-model="./assets/longma.min.glb" position="0 0 0" scale="0.08 0.08 0.08" horse-nav2></a-entity>
+  </a-scene>
+
+  <script>
+    const THREE = window.THREE || AFRAME.THREE;
+    AFRAME.registerComponent('horse-nav2', {
+      init: function () {
+        this.targetPos = new THREE.Vector3(0, 0, 0);
+        this.cur = new THREE.Vector3(0, 0, 0);
+        this.hasTarget = false;
+        this.speed = 1.2;
+        this.headOffset = 0;
+        this.ray = new THREE.Raycaster();
+        this.ground = document.getElementById('ground');
+        document.getElementById('sScale').addEventListener('input', e => { const s=+e.target.value; this.el.object3D.scale.set(s,s,s); });
+        document.getElementById('sSpeed').addEventListener('input', e => { this.speed = +e.target.value; });
+        document.getElementById('sHead').addEventListener('input', e => { this.headOffset = (+e.target.value)*Math.PI/180; });
+        this.el.sceneEl.canvas.addEventListener('click', (ev) => this.tap(ev));
+      },
+      tap: function (ev) {
+        const rect = this.el.sceneEl.canvas.getBoundingClientRect();
+        const ndc = new THREE.Vector2(((ev.clientX-rect.left)/rect.width)*2-1, -((ev.clientY-rect.top)/rect.height)*2+1);
+        this.ray.setFromCamera(ndc, this.el.sceneEl.camera);
+        const hits = this.ray.intersectObject(this.ground.object3D, false);
+        if (!hits.length) return;
+        const p = hits[0].point;
+        this.targetPos.set(p.x, 0, p.z);
+        this.hasTarget = true;
+      },
+      tick: function (t, dtms) {
+        if (!this.hasTarget) return;
+        const dt = Math.min(dtms||16,50)/1000;
+        const o = this.el.object3D;
+        const dx = this.targetPos.x - this.cur.x, dz = this.targetPos.z - this.cur.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.02) { this.hasTarget = false; return; }
+        const step = Math.min(this.speed*dt, dist);
+        const nx = dx/dist, nz = dz/dist;
+        this.cur.x += nx*step; this.cur.z += nz*step;
+        o.position.x = this.cur.x; o.position.z = this.cur.z;
+        o.rotation.y = Math.atan2(nz, -nx) + this.headOffset; // 头(局部 -X)朝行进方向
+      }
+    });
+  </script>
+</body>
+</html>

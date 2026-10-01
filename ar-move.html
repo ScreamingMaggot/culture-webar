@@ -59,7 +59,7 @@
       d.sort((a,b)=>score(b)-score(a));d.forEach((x,i)=>{const o=document.createElement('option');o.value=x.deviceId;o.textContent=x.label||('摄像头'+i);sel.appendChild(o);});if(d[0])sel.value=d[0].deviceId;}
     document.getElementById('go').addEventListener('click', async ()=>{
       const chosen=sel.value;const md=navigator.mediaDevices;const orig=md.getUserMedia.bind(md);
-      md.getUserMedia=function(c){c=Object.assign({},c);if(c.video)c.video=(chosen&&chosen!==AUTO)?{deviceId:{exact:chosen}}:{facingMode:'environment'};return orig(c);};
+      md.getUserMedia=function(c){c=Object.assign({},c);if(c.video)c.video=(chosen&&chosen!==AUTO)?{deviceId:{exact:chosen}}:true;return orig(c);};
       document.body.appendChild(document.getElementById('tpl').content.cloneNode(true));
       document.getElementById('start').style.display='none';
       document.getElementById('panel').style.display='block';
