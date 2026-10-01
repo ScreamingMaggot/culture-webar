@@ -47,10 +47,12 @@
         document.getElementById('sScale').addEventListener('input', e => { const s=+e.target.value; this.el.object3D.scale.set(s,s,s); });
         document.getElementById('sSpeed').addEventListener('input', e => { this.speed = +e.target.value; });
         document.getElementById('sHead').addEventListener('input', e => { this.headOffset = (+e.target.value)*Math.PI/180; });
-        this.el.sceneEl.canvas.addEventListener('click', (ev) => this.tap(ev));
+        this._tapHandler = (ev) => { const cv=this.el.sceneEl.canvas; if(cv && ev.target===cv) this.tap(ev); };
+        window.addEventListener('click', this._tapHandler);
       },
       tap: function (ev) {
-        const rect = this.el.sceneEl.canvas.getBoundingClientRect();
+        const cv = this.el.sceneEl.canvas; if(!cv) return;
+        const rect = cv.getBoundingClientRect();
         const ndc = new THREE.Vector2(((ev.clientX-rect.left)/rect.width)*2-1, -((ev.clientY-rect.top)/rect.height)*2+1);
         this.ray.setFromCamera(ndc, this.el.sceneEl.camera);
         const hits = this.ray.intersectObject(this.ground.object3D, true);

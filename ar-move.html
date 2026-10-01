@@ -87,14 +87,10 @@
           this.target.addEventListener('targetFound', () => { tip.textContent = '✅ 已识别！点桌面任意处，龙马会走过去'; });
           this.target.addEventListener('targetLost', () => { tip.textContent = '识别卡移出画面了，重新对准'; });
         }
-        this.onLoad = this.onLoad.bind(this);
-        this.el.object3D.addEventListener ? null : null;
         const scene = this.el.sceneEl;
-        scene.addEventListener('loaded', () => {});
         // 点击/触摸 canvas → 射线打到 hitplane → 转成 target 局部坐标
-        const canvas = scene.canvas || scene.querySelector('canvas');
-        this._clickHandler = (ev) => this.handleTap(ev);
-        (canvas || document).addEventListener('pointerdown', this._clickHandler);
+        this._clickHandler = (ev) => { const cv = scene.canvas; if (cv && ev.target === cv) this.handleTap(ev); };
+        window.addEventListener('pointerdown', this._clickHandler);
         // 滑杆
         document.getElementById('sScale').addEventListener('input', e => { const s=+e.target.value; this.el.object3D.scale.set(s,s,s); });
         document.getElementById('sSpeed').addEventListener('input', e => { this.speed = +e.target.value; });
