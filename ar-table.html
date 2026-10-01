@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>龙马 AR 桌面（四角标定 + 点触位移）</title>
+  <script src="./libs/aframe.min.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #eee; font-family: system-ui, "Microsoft YaHei", sans-serif; overflow: hidden; }
+    #v { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+    a-scene { position: fixed; inset: 0; z-index: 1; }
+    #calib { position: fixed; inset: 0; z-index: 5; touch-action: none; }
+    #calib.hidden { display: none; }
+    .corner { position: absolute; width: 34px; height: 34px; margin: -17px; border-radius: 50%; background: rgba(47,111,237,.85); border: 2px solid #fff; cursor: grab; }
+    .cline { position: absolute; inset: 0; pointer-events: none; }
+    #bar { position: fixed; top: 8px; left: 8px; right: 8px; z-index: 6; background: rgba(0,0,0,.65); padding: 8px 10px; border-radius: 10px; font-size: 13px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    #bar input { width: 56px; padding: 6px; border-radius: 6px; border: 1px solid #444; background: #111; color: #eee; }
+    #bar button { padding: 8px 12px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font-weight: 700; cursor: pointer; }
+    #bar button.gray { background: #333; }
+    #panel { position: fixed; bottom: 8px; left: 8px; right: 8px; z-index: 6; display: none; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 10px; font-size: 12px; }
+    #panel label { margin-right: 12px; }
+    #panel input[type=range] { width: 90px; vertical-align: middle; }
+    #start { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; text-align: center; padding: 24px; }
+    #start select { padding: 10px; border-radius: 10px; background: #22252b; color: #eee; border: 1px solid #444; }
+    #start button { padding: 14px 26px; border: 0; border-radius: 12px; font-size: 17px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
+    .hint { font-size: 13px; color: #ffd479; line-height: 1.6; max-width: 360px; }
+  </style>
+</head>
+<body>
+  <div id="start">
+    <h3>龙马 AR 桌面</h3>
+    <div class="hint">固定机位对准桌面。启动后把 4 个蓝点拖到桌面某个<b>已知真实尺寸矩形</b>的四角，填实际 宽×深(米)，点"标定"。之后点桌面任意处，龙马会走过去、头朝行进方向。</div>
+    <div><select id="cam"></select></div>
+    <button id="go">启动摄像头</button>
+  </div>
+
+  <video id="v" autoplay playsinline muted></video>
+  <div id="calib" class="hidden">
+    <svg class="cline"><polygon id="quad" fill="rgba(47,111,237,.12)" stroke="#2f6fed" stroke-width="2" points=""></polygon></svg>
+    <div class="corner" id="c0"></div><div class="corner" id="c1"></div><div class="corner" id="c2"></div><div class="corner" id="c3"></div>
+  </div>
+  <div id="bar" style="display:none">
+    <label>宽(米)<input id="W" type="number" value="0.6" step="0.1"></label>
+    <label>深(米)<input id="D" type="number" value="0.4" step="0.1"></label>
+    <button id="cal">标定</button>
+    <button id="recal" class="gray">重标四角</button>
+    <span id="mode" style="margin-left:auto"></span>
+  </div>
+  <div id="panel">
+    <label>缩放 <input id="sScale" type="range" min="0.05" max="0.6" step="0.01" value="0.22"></label>
+    <label>速度 <input id="sSpeed" type="range" min="0.1" max="2" step="0.05" value="0.5"></label>
+    <label>朝向偏移° <input id="sHead" type="range" min="0" max="360" step="15" value="0"></label>
+    <span style="color:#9fe870">点桌面让龙马走</span>
+  </div>
+
+  <a-scene renderer="alpha: true; colorManagement: true;" vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+    <a-entity id="cam" camera="fov: 60; near: 0.05; far: 100" look-controls="enabled: false" wasd-controls="enabled: false" position="0 0.5 1"></a-entity>
+    <a-light type="ambient" intensity="0.85"></a-light>
+    <a-light type="directional" position="1 3 2" intensity="0.9"></a-light>
+    <a-plane id="ground" rotation="-90 0 0" width="4" height="4" position="0 0 0" visible="false" material="transparent: true; opacity: 0"></a-plane>
+    <a-entity id="horse" gltf-model="./assets/longma.min.glb" position="0 0 0" scale="0.22 0.22 0.22" horse-nav3></a-entity>
+  </a-scene>
+
+  <script>
+    const T = window.THREE || AFRAME.THREE;
+    // ---------- 摄像头 ----------
+    const AUTO='__auto__', sel=document.getElementById('cam');
+    const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
+    const score=d=>{const l=(d.label||'').toLowerCase();if(BAD.test(l))return -10;if(/back|environment|rear|后置|主摄|wide/i.test(l))return 30;if(/front|user|face|前置/i.test(l))return 5;return 20;};
+    async function list(){let d=[];try{d=(await navigator.mediaDevices.enumerateDevices()).filter(x=>x.kind==='videoinput');}catch(e){}
+      sel.replaceChildren();const o0=document.createElement('option');o0.value=AUTO;o0.textContent='自动';sel.appendChild(o0);
+      d.sort((a,b)=>score(b)-score(a));d.forEach((x,i)=>{const o=document.createElement('option');o.value=x.deviceId;o.textContent=x.label||('摄像头'+i);sel.appendChild(o);});if(d[0])sel.value=d[0].deviceId;}
+    document.getElementById('go').addEventListener('click', async ()=>{
+      const chosen=sel.value; const md=navigator.mediaDevices; const orig=md.getUserMedia.bind(md);
+      md.getUserMedia=function(c){c=Object.assign({},c);if(c.video)c.video=(chosen&&chosen!==AUTO)?{deviceId:{exact:chosen}}:true;return orig(c);};
+      try{const s=await md.getUserMedia({video:true});document.getElementById('v').srcObject=s;}catch(e){alert('摄像头失败 '+e.name);}
+      document.getElementById('start').style.display='none';
+      document.getElementById('calib').classList.remove('hidden');
+      document.getElementById('bar').style.display='flex';
+      document.getElementById('mode').textContent='拖四角→填尺寸→标定';
+      resetCorners();
+    });
+    list();
+
+    // ---------- 四角拖拽 ----------
+    let corners=[[0.2,0.35],[0.8,0.35],[0.85,0.8],[0.15,0.8]];
+    let drag=-1;
+    function renderCorners(){const W=innerWidth,H=innerHeight;const px=corners.map(c=>[c[0]*W,c[1]*H]);
+      document.getElementById('quad').setAttribute('points',px.map(p=>p.join(',')).join(' '));
+      px.forEach((p,i)=>{const e=document.getElementById('c'+i);e.style.left=p[0]+'px';e.style.top=p[1]+'px';});}
+    function resetCorners(){corners=[[0.2,0.35],[0.8,0.35],[0.85,0.8],[0.15,0.8]];renderCorners();}
+    const cal=document.getElementById('calib');
+    cal.addEventListener('pointerdown',e=>{const id=e.target.id;if(id&&id[0]==='c')drag=+id[1];});
+    window.addEventListener('pointermove',e=>{if(drag<0)return;corners[drag]=[e.clientX/innerWidth,e.clientY/innerHeight];renderCorners();});
+    window.addEventListener('pointerup',()=>drag=-1);
+    window.addEventListener('resize',renderCorners);
+    document.getElementById('recal').addEventListener('click',()=>{cal.classList.remove('hidden');document.getElementById('panel').style.display='none';document.getElementById('mode').textContent='拖四角→填尺寸→标定';resetCorners();});
+
+    // ---------- 单应性 ----------
+    function solveLinear(A,b){const n=A.length;const M=A.map((r,i)=>r.concat(b[i]));
+      for(let i=0;i<n;i++){let p=i;for(let r=i+1;r<n;r++)if(Math.abs(M[r][i])>Math.abs(M[p][i]))p=r;const tmp=M[i];M[i]=M[p];M[p]=tmp;if(Math.abs(M[i][i])<1e-12)return null;
+        for(let r=0;r<n;r++){if(r===i)continue;const f=M[r][i]/M[i][i];for(let c=i;c<=n;c++)M[r][c]-=f*M[i][c];}}
+      return M.map((r,i)=>r[n]/r[i]);}
+    function homography(src,dst){const A=[],b=[];for(let i=0;i<4;i++){const[x,y]=src[i],[u,v]=dst[i];
+      A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v);}
+      const h=solveLinear(A,b);return h?[h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1]:null;}
+    function apply3(m,x,y){const X=m[0]*x+m[1]*y+m[2],Y=m[3]*x+m[4]*y+m[5],W=m[6]*x+m[7]*y+m[8];return [X/W,Y/W];}
+    function inv3(m){const[a,b,c,d,e,f,g,h,i]=m;const A=e*i-f*h,B=c*h-b*i,C=b*f-c*e,D=f*g-d*i,E=a*i-c*g,F=c*d-a*g,G=h*e-f*d,H=b*i-d*e,I=b*f-d*e? (b*f-e*d):0;
+      // 直接 3x3 逆
+      const m00=e*i-f*h,m01=c*h-b*i,m02=b*f-c*e,m10=f*g-d*i,m11=a*i-c*g,m12=c*d-a*f,m20=d*h-e*g,m21=b*g-a*h,m22=a*e-b*d;
+      const det=a*m00+b*m10+c*m20; if(!det)return null; const id=1/det;
+      return [m00*id,m01*id,m02*id,m10*id,m11*id,m12*id,m20*id,m21*id,m22*id];}
+
+    let H=null, Hinv=null, camPose=null;
+    document.getElementById('cal').addEventListener('click',()=>{
+      const Wm=parseFloat(document.getElementById('W').value), Dm=parseFloat(document.getElementById('D').value);
+      if(!(Wm>0&&Dm>0)){alert('填有效宽/深(米)');return;}
+      const sx=innerWidth, sy=innerHeight;
+      const screen=corners.map(c=>[c[0]*sx,c[1]*sy]); // TL,TR,BR,BL
+      // 世界平面坐标(x,z)米：以矩形中心为原点
+      const world=[[-Wm/2,-Dm/2],[Wm/2,-Dm/2],[Wm/2,Dm/2],[-Wm/2,Dm/2]];
+      H=homography(world,screen); // (x,z)->(u,v)
+      if(!H){alert('标定失败');return;}
+      Hinv=inv3(H);
+      // 由单应反推相机位姿：K 假设
+      const fov=60, f=(sy/2)/Math.tan(fov/2*Math.PI/180), cx=sx/2, cy=sy/2;
+      const Kinv=[[1/f,0,-cx/f],[0,1/f,-cy/f],[0,0,1]];
+      // M = Kinv * H (3x3)
+      const mul=(A,B)=>{const R=[[0,0,0],[0,0,0],[0,0,0]];for(let i=0;i<3;i++)for(let j=0;j<3;j++){let s=0;for(let k=0;k<3;k++)s+=A[i][k]*B[k][j];R[i][j]=s;}return R;};
+      const Hm=[[H[0],H[1],H[2]],[H[3],H[4],H[5]],[H[6],H[7],H[8]]];
+      const M=mul(Kinv,Hm);
+      let m1=[M[0][0],M[1][0],M[2][0]], m2=[M[0][1],M[1][1],M[2][1]], m3=[M[0][2],M[1][2],M[2][2]];
+      const n1=Math.hypot(...m1), n2=Math.hypot(...m2); const lam=2/(n1+n2);
+      let r_x=m1.map(v=>v*lam), r_z=m2.map(v=>v*lam), t=m3.map(v=>v*lam);
+      // r_y = 世界 y(平面法线, 指向"上") = r_x × r_z? 需右手系：world axes (x,y,z), 平面是 x,z, 法线 y
+      const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+      let r_y=cross(r_x,r_z); const ny=Math.hypot(...r_y); r_y=r_y.map(v=>v/ny);
+      // R(世界->相机) 列 = (r_x for world x, r_y for world y, r_z for world z)
+      const R=[ [r_x[0],r_y[0],r_z[0]], [r_x[1],r_y[1],r_z[1]], [r_x[2],r_y[2],r_z[2]] ];
+      // 相机世界位置 = -R^T t ; 相机->世界旋转 = R^T
+      const Rt=[[R[0][0],R[1][0],R[2][0]],[R[0][1],R[1][1],R[2][1]],[R[0][2],R[1][2],R[2][2]]];
+      const pos=[ -(Rt[0][0]*t[0]+Rt[0][1]*t[1]+Rt[0][2]*t[2]), -(Rt[1][0]*t[0]+Rt[1][1]*t[1]+Rt[1][2]*t[2]), -(Rt[2][0]*t[0]+Rt[2][1]*t[1]+Rt[2][2]*t[2]) ];
+      camPose={pos, R:Rt}; // Rt = 相机->世界
+      cal.classList.add('hidden');
+      document.getElementById('panel').style.display='block';
+      document.getElementById('mode').textContent='已标定，点桌面移动';
+      applyCam();
+    });
+    function applyCam(){ if(!camPose)return; const cam=document.getElementById('cam').object3D;
+      cam.position.set(camPose.pos[0],camPose.pos[1],camPose.pos[2]);
+      const m=new T.Matrix4(); m.makeBasis(new T.Vector3(...camPose.R[0]),new T.Vector3(...camPose.R[1]),new T.Vector3(...camPose.R[2]));
+      cam.quaternion.setFromRotationMatrix(m);
+    }
+
+    // ---------- 龙马导航 ----------
+    AFRAME.registerComponent('horse-nav3',{
+      init:function(){this.tp=new T.Vector3();this.cur=new T.Vector3();this.has=false;this.speed=0.5;this.head=0;this.ray=new T.Raycaster();
+        this.ground=document.getElementById('ground');
+        document.getElementById('sScale').addEventListener('input',e=>{const s=+e.target.value;this.el.object3D.scale.set(s,s,s);});
+        document.getElementById('sSpeed').addEventListener('input',e=>{this.speed=+e.target.value;});
+        document.getElementById('sHead').addEventListener('input',e=>{this.head=(+e.target.value)*Math.PI/180;});
+        window.addEventListener('click',(ev)=>{const cv=this.el.sceneEl.canvas; if(cv&&ev.target===cv&&H) this.tap(ev);});
+      },
+      tap:function(ev){ if(!Hinv)return; const cv=this.el.sceneEl.canvas; const r=cv.getBoundingClientRect();
+        const u=ev.clientX-r.left, v=ev.clientY-r.top; const [x,z]=apply3(Hinv,u,v); // 世界(x,z)米
+        this.tp.set(x,0,z); this.has=true; },
+      tick:function(t,dt){ if(!this.has)return; const d=Math.min(dt||16,50)/1000; const o=this.el.object3D;
+        const dx=this.tp.x-this.cur.x, dz=this.tp.z-this.cur.z, dist=Math.hypot(dx,dz);
+        if(dist<0.01){this.has=false;return;} const step=Math.min(this.speed*d,dist); const nx=dx/dist,nz=dz/dist;
+        this.cur.x+=nx*step; this.cur.z+=nz*step; o.position.x=this.cur.x; o.position.z=this.cur.z;
+        o.rotation.y=Math.atan2(nz,-nx)+this.head; }
+    });
+  </script>
+</body>
+</html>
