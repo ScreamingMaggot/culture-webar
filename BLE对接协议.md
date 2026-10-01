@@ -8,11 +8,11 @@
 - 所以网页只需向该模块的**可写特征写单个字节**，模块透传给 STM32 执行。
 - 收到业务指令后 STM32 会**回显同一字节**到 USART2（可作 ack，若模块支持 Notify）。
 
-## 1. 仍需王子涵提供（网页连蓝牙必需）
-STM32 侧只看到 UART，**BLE 模块的 GATT 信息在模块固件里**，网页连接要用：
-- [ ] 模块**广播名**（如 HM-10/JDY/其他）；
-- [ ] 可写**服务 UUID / 特征 UUID**（例：HM-10 常为 service `0xFFE0` / char `0xFFE1` write+notify）；
-- [ ] 模块型号（决定用 Write 还是 WriteWithoutResponse、是否支持 Notify）。
+## 1. BLE 模块（王子涵确认为 BT24）
+- BT24 是**透传型 BLE 串口模块**（多为 TI CC254x 方案），GATT 由模块固件定。
+- **候选（这类模块通用默认）**：Service `0xFFE0` / Characteristic `0xFFE1`（write + notify）。→ 大概率就是它，但 BT24 有变体、广播名可自配，**以现场枚举为准**。
+- **现场确认工具**：板子上电后用手机(夸克)打开 `ble-scan.html` → 连接 → 自动 dump 出真实广播名 + 全部 service/char UUID 与属性。把结果发我即可写死进协议。
+- 网页发指令＝向该可写特征写**单个字节**（见第 2 节）；模块透传到 STM32 USART2。
 
 ## 2. 真实指令字节表（网页写入的字节 → 动作）
 | 网页发 | 动作 | | 网页发 | 动作 |

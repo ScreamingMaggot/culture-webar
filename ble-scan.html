@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>BLE 连接并 dump UUID（BT24 现场确认）</title>
+  <style>
+    body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #111; color: #eee; padding: 16px; }
+    h3 { margin-top: 0; }
+    button { padding: 14px 22px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
+    #log { margin-top: 14px; white-space: pre-wrap; font: 12px ui-monospace, Consolas, monospace; color: #9fe870; background: #000; padding: 12px; border-radius: 8px; line-height: 1.5; }
+    .hint { font-size: 13px; color: #ffd479; line-height: 1.6; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h3>BLE 连接并 dump 全部 Service / Characteristic UUID</h3>
+  <div>板子上电后点下面按钮 → 在弹窗里选那个蓝牙模块 → 本页会打印它的名字、服务、特征与属性。</div>
+  <div style="margin:14px 0"><button id="b">连接并枚举</button></div>
+  <div id="log">navigator.bluetooth 存在? <span id="sup"></span></div>
+  <p class="hint">用途：确认 BT24 的真实广播名 + 可写特征 UUID（协议里要填的）。把打印结果发我即可。</p>
+  <script>
+    document.getElementById('sup').textContent = ('bluetooth' in navigator) ? 'true' : 'false ❌ 本浏览器不支持';
+    const log = (s) => { const el = document.getElementById('log'); el.textContent += '\n' + s; el.scrollTop = el.scrollHeight; };
+    document.getElementById('b').addEventListener('click', async () => {
+      if (!navigator.bluetooth) { log('不支持 Web Bluetooth'); return; }
+      log('——— 打开设备选择器 ———');
+      try {
+        // 覆盖常见国产透传模块的服务 UUID，便于枚举到特征
+        const dev = await navigator.bluetooth.requestDevice({
+          acceptAllDevices: true,
+          optionalServices: ['ffe0','ffe1','ffe2','fff0','fff1','fff2','fff6','fff7','fff8','ff00','ff02','0000ff00-0000-1000-8000-00805f9b34fb','battery_service','device_information']
+        });
+        log('设备名: ' + (dev.name || '(无名)'));
+        log('deviceId: ' + dev.id);
+        const server = await dev.gatt.connect();
+        log('已连接，枚举服务…');
+        const services = await server.getPrimaryServices();
+        for (const s of services) {
+          log('\n[Service] ' + s.uuid);
+          try {
+            const chars = await s.getCharacteristics();
+            for (const c of chars) log('   [Char] ' + c.uuid + '  属性: ' + c.properties.map(p=>p).join(','));
+          } catch (e) { log('   (读特征失败: ' + e.name + ')'); }
+        }
+        log('\n✅ 完成。把以上贴给我：可写(write/writeWithoutResponse)的那个特征就是发指令用的。');
+      } catch (e) {
+        log('结束/错误: ' + e.name + ' — ' + e.message);
+      }
+    });
+  </script>
+</body>
+</html>
