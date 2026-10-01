@@ -47,10 +47,11 @@
     <span id="mode" style="margin-left:auto"></span>
   </div>
   <div id="panel">
-    <label>缩放 <input id="sScale" type="range" min="0.05" max="0.6" step="0.01" value="0.22"></label>
+    <label>缩放 <input id="sScale" type="range" min="0.01" max="0.15" step="0.005" value="0.04"></label>
     <label>速度 <input id="sSpeed" type="range" min="0.1" max="2" step="0.05" value="0.5"></label>
+    <label>俯仰/FOV <input id="sFov" type="range" min="30" max="90" step="1" value="60"></label>
     <label>朝向偏移° <input id="sHead" type="range" min="0" max="360" step="15" value="0"></label>
-    <span style="color:#9fe870">点桌面让龙马走</span>
+    <span style="color:#9fe870">点桌面让龙马走；拨FOV对准透视</span>
   </div>
 
   <a-scene renderer="alpha: true; colorManagement: true;" vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
@@ -58,7 +59,7 @@
     <a-light type="ambient" intensity="0.85"></a-light>
     <a-light type="directional" position="1 3 2" intensity="0.9"></a-light>
     <a-plane id="ground" rotation="-90 0 0" width="4" height="4" position="0 0 0" visible="false" material="transparent: true; opacity: 0"></a-plane>
-    <a-entity id="horse" gltf-model="./assets/longma.min.glb" position="0 0 0" scale="0.22 0.22 0.22" horse-nav3></a-entity>
+    <a-entity id="horse" gltf-model="./assets/longma.min.glb" position="0 0 0" scale="0.04 0.04 0.04" horse-nav3></a-entity>
   </a-scene>
 
   <script>
@@ -111,46 +112,42 @@
       const det=a*m00+b*m10+c*m20; if(!det)return null; const id=1/det;
       return [m00*id,m01*id,m02*id,m10*id,m11*id,m12*id,m20*id,m21*id,m22*id];}
 
-    let H=null, Hinv=null, camPose=null;
+    let H=null, Hinv=null;
+    const mul3=(A,B)=>{const R=[[0,0,0],[0,0,0],[0,0,0]];for(let i=0;i<3;i++)for(let j=0;j<3;j++){let s=0;for(let k=0;k<3;k++)s+=A[i][k]*B[k][j];R[i][j]=s;}return R;};
+    const cross3=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+    // 由单应 H(世界(x,z)->屏幕px) + 假设FOV 反推相机位姿并施加到 A-Frame 相机
+    function computePose(fovDeg){
+      if(!H) return;
+      const sx=innerWidth, sy=innerHeight;
+      const f=(sy/2)/Math.tan(fovDeg/2*Math.PI/180), cx=sx/2, cy=sy/2;
+      const Kinv=[[1/f,0,-cx/f],[0,1/f,-cy/f],[0,0,1]];
+      const M=mul3(Kinv,[[H[0],H[1],H[2]],[H[3],H[4],H[5]],[H[6],H[7],H[8]]]);
+      let m1=[M[0][0],M[1][0],M[2][0]], m2=[M[0][1],M[1][1],M[2][1]], m3=[M[0][2],M[1][2],M[2][2]];
+      const lam=2/((Math.hypot(m1[0],m1[1],m1[2])||1)+(Math.hypot(m2[0],m2[1],m2[2])||1));
+      let r_x=m1.map(v=>v*lam), r_z=m2.map(v=>v*lam), t=m3.map(v=>v*lam);
+      let r_y=cross3(r_x,r_z); const ny=Math.hypot(r_y[0],r_y[1],r_y[2])||1; r_y=r_y.map(v=>v/ny);
+      const R=[[r_x[0],r_y[0],r_z[0]],[r_x[1],r_y[1],r_z[1]],[r_x[2],r_y[2],r_z[2]]];
+      const Rt=[[R[0][0],R[1][0],R[2][0]],[R[0][1],R[1][1],R[2][1]],[R[0][2],R[1][2],R[2][2]]];
+      const pos=[-((Rt[0][0]*t[0]+Rt[0][1]*t[1]+Rt[0][2]*t[2])),-((Rt[1][0]*t[0]+Rt[1][1]*t[1]+Rt[1][2]*t[2])),-((Rt[2][0]*t[0]+Rt[2][1]*t[1]+Rt[2][2]*t[2]))];
+      const camEl=document.getElementById('cam'); const cam=camEl.object3D;
+      cam.position.set(pos[0],pos[1],pos[2]);
+      const mm=new T.Matrix4(); mm.makeBasis(new T.Vector3(Rt[0][0],Rt[0][1],Rt[0][2]),new T.Vector3(Rt[1][0],Rt[1][1],Rt[1][2]),new T.Vector3(Rt[2][0],Rt[2][1],Rt[2][2]));
+      cam.quaternion.setFromRotationMatrix(mm);
+      camEl.setAttribute('camera','fov',fovDeg);
+    }
     document.getElementById('cal').addEventListener('click',()=>{
       const Wm=parseFloat(document.getElementById('W').value), Dm=parseFloat(document.getElementById('D').value);
       if(!(Wm>0&&Dm>0)){alert('填有效宽/深(米)');return;}
       const sx=innerWidth, sy=innerHeight;
       const screen=corners.map(c=>[c[0]*sx,c[1]*sy]); // TL,TR,BR,BL
-      // 世界平面坐标(x,z)米：以矩形中心为原点
       const world=[[-Wm/2,-Dm/2],[Wm/2,-Dm/2],[Wm/2,Dm/2],[-Wm/2,Dm/2]];
-      H=homography(world,screen); // (x,z)->(u,v)
-      if(!H){alert('标定失败');return;}
-      Hinv=inv3(H);
-      // 由单应反推相机位姿：K 假设
-      const fov=60, f=(sy/2)/Math.tan(fov/2*Math.PI/180), cx=sx/2, cy=sy/2;
-      const Kinv=[[1/f,0,-cx/f],[0,1/f,-cy/f],[0,0,1]];
-      // M = Kinv * H (3x3)
-      const mul=(A,B)=>{const R=[[0,0,0],[0,0,0],[0,0,0]];for(let i=0;i<3;i++)for(let j=0;j<3;j++){let s=0;for(let k=0;k<3;k++)s+=A[i][k]*B[k][j];R[i][j]=s;}return R;};
-      const Hm=[[H[0],H[1],H[2]],[H[3],H[4],H[5]],[H[6],H[7],H[8]]];
-      const M=mul(Kinv,Hm);
-      let m1=[M[0][0],M[1][0],M[2][0]], m2=[M[0][1],M[1][1],M[2][1]], m3=[M[0][2],M[1][2],M[2][2]];
-      const n1=Math.hypot(...m1), n2=Math.hypot(...m2); const lam=2/(n1+n2);
-      let r_x=m1.map(v=>v*lam), r_z=m2.map(v=>v*lam), t=m3.map(v=>v*lam);
-      // r_y = 世界 y(平面法线, 指向"上") = r_x × r_z? 需右手系：world axes (x,y,z), 平面是 x,z, 法线 y
-      const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
-      let r_y=cross(r_x,r_z); const ny=Math.hypot(...r_y); r_y=r_y.map(v=>v/ny);
-      // R(世界->相机) 列 = (r_x for world x, r_y for world y, r_z for world z)
-      const R=[ [r_x[0],r_y[0],r_z[0]], [r_x[1],r_y[1],r_z[1]], [r_x[2],r_y[2],r_z[2]] ];
-      // 相机世界位置 = -R^T t ; 相机->世界旋转 = R^T
-      const Rt=[[R[0][0],R[1][0],R[2][0]],[R[0][1],R[1][1],R[2][1]],[R[0][2],R[1][2],R[2][2]]];
-      const pos=[ -(Rt[0][0]*t[0]+Rt[0][1]*t[1]+Rt[0][2]*t[2]), -(Rt[1][0]*t[0]+Rt[1][1]*t[1]+Rt[1][2]*t[2]), -(Rt[2][0]*t[0]+Rt[2][1]*t[1]+Rt[2][2]*t[2]) ];
-      camPose={pos, R:Rt}; // Rt = 相机->世界
+      H=homography(world,screen); if(!H){alert('标定失败');return;} Hinv=inv3(H);
       cal.classList.add('hidden');
       document.getElementById('panel').style.display='block';
-      document.getElementById('mode').textContent='已标定，点桌面移动';
-      applyCam();
+      document.getElementById('mode').textContent='已标定，点桌面移动；拨“俯仰/FOV”对准透视';
+      computePose(parseFloat(document.getElementById('sFov').value)||60);
     });
-    function applyCam(){ if(!camPose)return; const cam=document.getElementById('cam').object3D;
-      cam.position.set(camPose.pos[0],camPose.pos[1],camPose.pos[2]);
-      const m=new T.Matrix4(); m.makeBasis(new T.Vector3(...camPose.R[0]),new T.Vector3(...camPose.R[1]),new T.Vector3(...camPose.R[2]));
-      cam.quaternion.setFromRotationMatrix(m);
-    }
+    document.getElementById('sFov').addEventListener('input', e=>computePose(+e.target.value));
 
     // ---------- 龙马导航 ----------
     AFRAME.registerComponent('horse-nav3',{
