@@ -35,7 +35,10 @@ localhost 是安全上下文，可直接授权摄像头。
    node serve.mjs --https --host 0.0.0.0     # 手机访问 https://<本机局域网IP>:8443，首次忽略证书警告
    ```
    > 证书已生成（`certs/`，含 SAN: localhost + 192.168.31.193）。若 openssl 命令行 `-subj "/CN=..."` 在 Git-bash 下被当路径报错，用配置文件方式（见 certs/openssl.cnf）。
-2. **GitHub Pages**（推荐正式演示/答辩用，自带 HTTPS，扫码即用，契合比赛"HTML5 链接/二维码"展现形式）。
+2. **GitHub Pages**（已部署，推荐正式演示/答辩用，自带 HTTPS，扫码即用，契合比赛"HTML5 链接/二维码"展现形式）。
+   - **线上地址**：https://screamingmaggot.github.io/culture-webar/ （用**夸克**打开；HTTPS 下摄像头直接可用、无自签证书警告）
+   - 仓库：`github.com/ScreamingMaggot/culture-webar`（public）。当前入口 `index.html` = MindAR 生产版，默认用官方 `mindar/card.mind` 占位。
+   - **改了内容后重新部署**：`git add -A && git commit -m "..." && git push` → Pages 约 1 分钟自动更新。
 3. **cloudflared 临时隧道**：`cloudflared tunnel --url http://localhost:8000` 得一个 https 临时域名，路演应急。
 
 ### 2.1 内置摄像头选择器（手机多摄/黑屏时用）
