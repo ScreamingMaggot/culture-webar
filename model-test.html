@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>龙马模型加载自检（无摄像头）</title>
+  <script src="./libs/aframe.min.js"></script>
+</head>
+<body>
+  <div id="r" style="position:fixed;top:8px;left:8px;z-index:99;font:13px monospace;color:#0f0;background:#000;padding:8px;border-radius:8px"></div>
+  <a-scene background="color: #222">
+    <a-entity id="m" gltf-model="./assets/longma.glb" position="0 0 -2" scale="0.06 0.06 0.06"
+              animation="property: rotation; to: 0 360 0; dur: 8000; loop: true; easing: linear"></a-entity>
+    <a-entity camera look-controls position="0 0.6 0"></a-entity>
+    <a-light type="ambient" intensity="0.8"></a-light>
+    <a-light type="directional" position="1 3 2" intensity="0.8"></a-light>
+  </a-scene>
+  <script>
+    const r = document.getElementById('r');
+    const m = document.getElementById('m');
+    m.addEventListener('model-loaded', () => {
+      let meshes = 0; m.object3D.traverse(o => { if (o.isMesh) meshes++; });
+      const box = new THREE.Box3().setFromObject(m.object3D);
+      const size = new THREE.Vector3(); box.getSize(size);
+      r.textContent = '✅ 模型已加载 meshes=' + meshes + ' 尺寸(含scale)≈ ' + size.x.toFixed(2)+'×'+size.y.toFixed(2)+'×'+size.z.toFixed(2);
+    });
+    m.addEventListener('model-error', (e) => { r.textContent = '❌ 模型加载失败: ' + JSON.stringify(e.detail || {}); });
+    setTimeout(() => { if (!/✅|❌/.test(r.textContent)) r.textContent = '…仍在加载或未触发（看控制台）'; }, 8000);
+  </script>
+</body>
+</html>
