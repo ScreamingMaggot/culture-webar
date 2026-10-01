@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>桌面平面标定（拖四角 → 点击取坐标）</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #eee; font-family: system-ui, "Microsoft YaHei", sans-serif; overflow: hidden; }
+    #stage { position: fixed; inset: 0; }
+    video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    svg { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; }
+    .corner { fill: #2f6fed; stroke: #fff; stroke-width: 2; r: 16; cursor: grab; }
+    .quad { fill: rgba(47,111,237,.15); stroke: #2f6fed; stroke-width: 2; }
+    .hit { fill: #ff3b30; stroke: #fff; stroke-width: 2; }
+    #bar { position: fixed; top: 8px; left: 8px; right: 8px; z-index: 10; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; background: rgba(0,0,0,.6); padding: 8px; border-radius: 10px; font-size: 13px; }
+    #bar input { width: 56px; padding: 6px; border-radius: 6px; border: 1px solid #444; background: #111; color: #eee; }
+    #bar button { padding: 8px 12px; border: 0; border-radius: 8px; background: #2f6fed; color: #fff; font-weight: 700; cursor: pointer; }
+    #bar button.gray { background: #333; }
+    #out { position: fixed; bottom: 10px; left: 10px; right: 10px; z-index: 10; font: 13px ui-monospace, Consolas, monospace; color: #9fe870; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; }
+    #start { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; text-align: center; padding: 24px; }
+    #start select { padding: 10px; border-radius: 10px; background: #22252b; color: #eee; border: 1px solid #444; }
+    #start button { padding: 14px 26px; border: 0; border-radius: 12px; font-size: 17px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
+    .hint { font-size: 13px; color: #ffd479; line-height: 1.6; max-width: 360px; }
+  </style>
+</head>
+<body>
+  <div id="start">
+    <h3>桌面平面标定</h3>
+    <div class="hint">固定机位对准桌面。选摄像头并启动后，把 4 个蓝点拖到桌面某个<b>已知真实尺寸矩形</b>的四角（如打印垫/纸张），填好实际 宽×高(cm)，点"标定"。之后点屏幕任意处即显示该点的桌面坐标(cm)。</div>
+    <div class="row"><select id="cam"></select></div>
+    <button id="go">启动摄像头</button>
+  </div>
+
+  <div id="stage" style="display:none">
+    <video id="v" autoplay playsinline muted></video>
+    <svg id="svg">
+      <polygon id="quad" class="quad" points=""></polygon>
+      <circle class="corner" id="c0"></circle>
+      <circle class="corner" id="c1"></circle>
+      <circle class="corner" id="c2"></circle>
+      <circle class="corner" id="c3"></circle>
+      <circle class="hit" id="hit" r="10" style="display:none"></circle>
+    </svg>
+    <div id="bar">
+      <label>宽(cm)<input id="W" type="number" value="60"></label>
+      <label>高(cm)<input id="H" type="number" value="40"></label>
+      <button id="cal">标定</button>
+      <button id="reset" class="gray">重置角点</button>
+      <span id="mode">模式：拖角标定</span>
+    </div>
+    <div id="out">未标定。拖好四角→填尺寸→点“标定”。</div>
+  </div>
+
+  <script>
+    // ---- 摄像头启动（含 deviceId 改写，兼容夸克）----
+    const AUTO='__auto__';
+    const sel=document.getElementById('cam');
+    const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
+    const score=d=>{const l=(d.label||'').toLowerCase();if(BAD.test(l))return -10;if(/back|environment|rear|后置|主摄|wide/i.test(l))return 30;if(/front|user|face|前置/i.test(l))return 5;return 20;};
+    async function list(){let d=[];try{d=(await navigator.mediaDevices.enumerateDevices()).filter(x=>x.kind==='videoinput');}catch(e){}
+      sel.replaceChildren();const o0=document.createElement('option');o0.value=AUTO;o0.textContent='自动(后置)';sel.appendChild(o0);
+      d.sort((a,b)=>score(b)-score(a));d.forEach((x,i)=>{const o=document.createElement('option');o.value=x.deviceId;o.textContent=x.label||('摄像头'+i);sel.appendChild(o);});if(d[0])sel.value=d[0].deviceId;}
+    document.getElementById('go').addEventListener('click', async ()=>{
+      const chosen=sel.value;const md=navigator.mediaDevices;const orig=md.getUserMedia.bind(md);
+      md.getUserMedia=function(c){c=Object.assign({},c);if(c.video)c.video=(chosen&&chosen!==AUTO)?{deviceId:{exact:chosen}}:{facingMode:'environment'};return orig(c);};
+      try{const s=await md.getUserMedia({video:true});document.getElementById('v').srcObject=s;document.getElementById('start').style.display='none';document.getElementById('stage').style.display='block';resetCorners();}
+      catch(e){alert('摄像头失败: '+e.name+' '+e.message);}
+    });
+    list();
+
+    // ---- 四角拖拽 + 单应性 ----
+    const svg=document.getElementById('svg'), v=document.getElementById('v');
+    const corners=[[0.25,0.3],[0.75,0.3],[0.75,0.8],[0.25,0.8]]; // 相对坐标
+    let H=null; // 3x3 单应矩阵 (屏幕px -> 桌面cm)
+    function vw(){return v.videoWidth||window.innerWidth;} function vh(){return v.videoHeight||window.innerHeight;}
+    function toPx(p){return [p[0]*window.innerWidth, p[1]*window.innerHeight];} // 相对->屏幕px(叠加层用屏幕尺寸)
+    function render(){
+      const pts=corners.map(toPx);
+      document.getElementById('quad').setAttribute('points', pts.map(p=>p.join(',')).join(' '));
+      pts.forEach((p,i)=>{const c=document.getElementById('c'+i);c.setAttribute('cx',p[0]);c.setAttribute('cy',p[1]);});
+    }
+    function resetCorners(){H=null;document.getElementById('out').textContent='未标定。拖好四角→填尺寸→点“标定”。';document.getElementById('mode').textContent='模式：拖角标定';render();}
+    // 拖拽
+    let drag=-1;
+    function pos(ev){const t=ev.touches?ev.touches[0]:ev;return [t.clientX/window.innerWidth, t.clientY/window.innerHeight];}
+    svg.addEventListener('pointerdown',e=>{const id=e.target.id; if(id&&id[0]==='c'){drag=+id[1];} else if(H){tap(e);} });
+    window.addEventListener('pointermove',e=>{if(drag<0)return;corners[drag]=pos(e);render();});
+    window.addEventListener('pointerup',()=>{drag=-1;});
+
+    // 单应性求解：src(屏幕px 4点) -> dst(桌面cm 4点)
+    function solveLinear(A,b){const n=A.length;const M=A.map((r,i)=>r.concat(b[i]));
+      for(let i=0;i<n;i++){let p=i;for(let r=i+1;r<n;r++)if(Math.abs(M[r][i])>Math.abs(M[p][i]))p=r;[M[i],M[p]]=[M[p],M[i]];if(Math.abs(M[i][i])<1e-12)return null;
+        for(let r=0;r<n;r++){if(r===i)continue;const f=M[r][i]/M[i][i];for(let c=i;c<=n;c++)M[r][c]-=f*M[i][c];}}
+      return M.map((r,i)=>r[n]/r[i]);}
+    function computeH(src,dst){const A=[],b=[];
+      for(let i=0;i<4;i++){const[x,y]=src[i],[u,vv]=dst[i];
+        A.push([x,y,1,0,0,0,-u*x,-u*y]); b.push(u);
+        A.push([0,0,0,x,y,1,-vv*x,-vv*y]); b.push(vv);}
+      const h=solveLinear(A,b); if(!h)return null; return [h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1];}
+    function applyH(m,x,y){const X=m[0]*x+m[1]*y+m[2],Y=m[3]*x+m[4]*y+m[5],W=m[6]*x+m[7]*y+m[8];return [X/W,Y/W];}
+
+    document.getElementById('cal').addEventListener('click',()=>{
+      const W=parseFloat(document.getElementById('W').value), Hh=parseFloat(document.getElementById('H').value);
+      if(!(W>0&&Hh>0)){alert('请填写有效的实际宽/高(cm)');return;}
+      const src=corners.map(toPx); // 屏幕px（叠加层与视频同尺寸，近似）
+      const dst=[[0,0],[W,0],[W,Hh],[0,Hh]]; // 对应 TL,TR,BR,BL
+      H=computeH(src,dst);
+      if(!H){document.getElementById('out').textContent='标定失败（四角可能共线/退化），调整后再试。';return;}
+      document.getElementById('mode').textContent='模式：点击取坐标';
+      document.getElementById('out').textContent='已标定。现在点屏幕任意处读取桌面坐标(cm)。';
+    });
+    function tap(e){
+      if(!H)return;
+      const x=e.clientX, y=e.clientY;
+      const [cx,cy]=applyH(H,x,y);
+      const hit=document.getElementById('hit');hit.setAttribute('cx',x);hit.setAttribute('cy',y);hit.style.display='';
+      document.getElementById('out').textContent='屏幕('+Math.round(x)+','+Math.round(y)+') → 桌面 ('+cx.toFixed(1)+' cm, '+cy.toFixed(1)+' cm)\n(下一步：把这个坐标发给龙马/或驱动虚拟模型)';
+    }
+    window.addEventListener('resize',render);
+  </script>
+</body>
+</html>
