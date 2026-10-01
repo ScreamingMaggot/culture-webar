@@ -53,7 +53,7 @@
         const rect = this.el.sceneEl.canvas.getBoundingClientRect();
         const ndc = new THREE.Vector2(((ev.clientX-rect.left)/rect.width)*2-1, -((ev.clientY-rect.top)/rect.height)*2+1);
         this.ray.setFromCamera(ndc, this.el.sceneEl.camera);
-        const hits = this.ray.intersectObject(this.ground.object3D, false);
+        const hits = this.ray.intersectObject(this.ground.object3D, true);
         if (!hits.length) return;
         const p = hits[0].point;
         this.targetPos.set(p.x, 0, p.z);

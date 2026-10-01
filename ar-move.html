@@ -109,7 +109,7 @@
         const cam = this.el.sceneEl.camera;
         if (!cam) return;
         this.raycaster.setFromCamera(this.ndc, cam);
-        const hits = this.raycaster.intersectObject(this.hit.object3D, false);
+        const hits = this.raycaster.intersectObject(this.hit.object3D, true);
         if (!hits.length) return;
         const p = hits[0].point.clone();
         this.target.object3D.worldToLocal(p); // 世界 → 卡局部
