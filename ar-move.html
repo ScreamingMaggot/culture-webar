@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>龙马 AR · 点击位移（头朝行进方向）</title>
+  <script src="./libs/aframe.min.js"></script>
+  <script src="./libs/mindar-image-aframe.prod.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: transparent; font-family: system-ui, "Microsoft YaHei", sans-serif; overflow: hidden; }
+    #start { position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; color: #eee; text-align: center; padding: 24px; }
+    #start .hint { font-size: 13px; color: #ffd479; line-height: 1.6; max-width: 360px; }
+    #start select { padding: 10px; border-radius: 10px; background: #22252b; color: #eee; border: 1px solid #444; }
+    #go { padding: 14px 26px; border: 0; border-radius: 12px; font-size: 17px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
+    #panel { position: fixed; top: 8px; left: 8px; z-index: 9999; display: none; background: rgba(0,0,0,.6); color: #eee; padding: 8px 10px; border-radius: 10px; font-size: 12px; }
+    #panel label { display: block; margin: 4px 0; }
+    #panel input[type=range] { width: 130px; vertical-align: middle; }
+    #tip { position: fixed; bottom: 10px; left: 10px; right: 10px; z-index: 9999; display: none; font-size: 13px; color: #9fe870; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <div id="start">
+    <h3>龙马 AR · 点击位移</h3>
+    <div class="hint">选摄像头启动后，把打印的识别卡（当前用官方 <b>mindar/card.png</b>）平放桌面，对准摄像头。识别到后点桌面任意处，龙马会平滑走过去、<b>头朝行进方向</b>。</div>
+    <div><select id="cam"></select></div>
+    <button id="go">启动 AR</button>
+  </div>
+
+  <div id="panel">
+    <label>缩放 <input id="sScale" type="range" min="0.01" max="0.3" step="0.005" value="0.06"></label>
+    <label>速度 <input id="sSpeed" type="range" min="0.1" max="3" step="0.1" value="0.8"></label>
+    <label>朝向偏移° <input id="sHead" type="range" min="0" max="360" step="15" value="0"></label>
+  </div>
+  <div id="tip">点桌面让龙马走过去</div>
+
+  <template id="tpl">
+    <a-scene
+      mindar-image="imageTargetSrc: ./mindar/card.mind;"
+      embedded color-space="sRGB" renderer="colorManagement: true; antialias: false;"
+      vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      <a-entity id="target" mindar-image-target="targetIndex: 0">
+        <!-- 不可见命中平面，铺在识别卡平面上，用于把点击映射到卡局部坐标 -->
+        <a-plane id="hitplane" rotation="-90 0 0" width="3" height="3" position="0 0 0"
+                 material="transparent: true; opacity: 0; color: #000"></a-plane>
+        <a-entity id="horse" horse-nav gltf-model="./assets/longma.glb" position="0 0 0" scale="0.06 0.06 0.06"></a-entity>
+      </a-entity>
+    </a-scene>
+  </template>
+
+  <script>
+    // ---- 摄像头启动（deviceId 改写，兼容夸克）----
+    const AUTO='__auto__';
+    const sel=document.getElementById('cam');
+    const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
+    const score=d=>{const l=(d.label||'').toLowerCase();if(BAD.test(l))return -10;if(/back|environment|rear|后置|主摄|wide/i.test(l))return 30;if(/front|user|face|前置/i.test(l))return 5;return 20;};
+    async function list(){let d=[];try{d=(await navigator.mediaDevices.enumerateDevices()).filter(x=>x.kind==='videoinput');}catch(e){}
+      sel.replaceChildren();const o0=document.createElement('option');o0.value=AUTO;o0.textContent='自动(后置)';sel.appendChild(o0);
+      d.sort((a,b)=>score(b)-score(a));d.forEach((x,i)=>{const o=document.createElement('option');o.value=x.deviceId;o.textContent=x.label||('摄像头'+i);sel.appendChild(o);});if(d[0])sel.value=d[0].deviceId;}
+    document.getElementById('go').addEventListener('click', async ()=>{
+      const chosen=sel.value;const md=navigator.mediaDevices;const orig=md.getUserMedia.bind(md);
+      md.getUserMedia=function(c){c=Object.assign({},c);if(c.video)c.video=(chosen&&chosen!==AUTO)?{deviceId:{exact:chosen}}:{facingMode:'environment'};return orig(c);};
+      try{const s=await md.getUserMedia({video:true});s.getTracks().forEach(t=>t.stop());}catch(e){}
+      document.body.appendChild(document.getElementById('tpl').content.cloneNode(true));
+      document.getElementById('start').style.display='none';
+      document.getElementById('panel').style.display='block';
+      document.getElementById('tip').style.display='block';
+    });
+    list();
+
+    // ---- horse-nav 组件：点击位移 + 头朝行进方向 ----
+    const THREE = window.THREE || AFRAME.THREE;
+    AFRAME.registerComponent('horse-nav', {
+      init: function () {
+        this.el = this.el;
+        this.targetPos = new THREE.Vector3(0, 0, 0); // 目标(卡局部 x,z)
+        this.cur = new THREE.Vector3(0, 0, 0);
+        this.hasTarget = false;
+        this.raycaster = new THREE.Raycaster();
+        this.ndc = new THREE.Vector2();
+        this.headOffset = 0; // 弧度
+        this.speed = 0.8;
+        this.target = document.querySelector('#target');
+        this.hit = document.querySelector('#hitplane');
+        this.onLoad = this.onLoad.bind(this);
+        this.el.object3D.addEventListener ? null : null;
+        const scene = this.el.sceneEl;
+        scene.addEventListener('loaded', () => {});
+        // 点击/触摸 canvas → 射线打到 hitplane → 转成 target 局部坐标
+        const canvas = scene.canvas || scene.querySelector('canvas');
+        this._clickHandler = (ev) => this.handleTap(ev);
+        (canvas || document).addEventListener('pointerdown', this._clickHandler);
+        // 滑杆
+        document.getElementById('sScale').addEventListener('input', e => { const s=+e.target.value; this.el.object3D.scale.set(s,s,s); });
+        document.getElementById('sSpeed').addEventListener('input', e => { this.speed = +e.target.value; });
+        document.getElementById('sHead').addEventListener('input', e => { this.headOffset = (+e.target.value) * Math.PI / 180; });
+      },
+      handleTap: function (ev) {
+        if (!this.hit || !this.hit.object3D || !this.target || !this.target.object3D) return;
+        const rect = this.el.sceneEl.canvas.getBoundingClientRect();
+        const x = (ev.clientX - rect.left) / rect.width;
+        const y = (ev.clientY - rect.top) / rect.height;
+        this.ndc.set(x * 2 - 1, -(y * 2 - 1));
+        const cam = this.el.sceneEl.camera;
+        if (!cam) return;
+        this.raycaster.setFromCamera(this.ndc, cam);
+        const hits = this.raycaster.intersectObject(this.hit.object3D, false);
+        if (!hits.length) return;
+        const p = hits[0].point.clone();
+        this.target.object3D.worldToLocal(p); // 世界 → 卡局部
+        this.targetPos.set(p.x, 0, p.z);
+        this.hasTarget = true;
+      },
+      tick: function (time, dtms) {
+        if (!this.hasTarget) return;
+        const dt = Math.min(dtms || 16, 50) / 1000;
+        const o = this.el.object3D;
+        const dx = this.targetPos.x - this.cur.x;
+        const dz = this.targetPos.z - this.cur.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.01) { this.hasTarget = false; return; }
+        const step = Math.min(this.speed * dt, dist);
+        const nx = dx / dist, nz = dz / dist;
+        this.cur.x += nx * step; this.cur.z += nz * step;
+        o.position.x = this.cur.x; o.position.z = this.cur.z;
+        // 头(局部 -X)朝行进方向：rotation.y = atan2(nz, -nx) + offset
+        o.rotation.y = Math.atan2(nz, -nx) + this.headOffset;
+      }
+    });
+  </script>
+</body>
+</html>
