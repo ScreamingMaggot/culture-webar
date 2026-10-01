@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebXR 支持探测</title>
+  <style>
+    body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #111; color: #eee; padding: 18px; line-height: 1.8; }
+    .ok { color: #9fe870; font-weight: 700; } .no { color: #ff6b6b; font-weight: 700; }
+    #out { font-size: 15px; }
+    .hint { font-size: 13px; color: #ffd479; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h3>WebXR 支持探测</h3>
+  <div id="out">检测中…</div>
+  <p class="hint">在<b>手机夸克</b>和<b>手机 Chrome</b>各开一次，把结果告诉我。<br>
+  只有 immersive-ar = ✅ 支持，才能走"不打印卡、点桌面放龙马"的 WebXR 路线；否则那条走不通，得用打印识别图(MindAR)。</p>
+  <script>
+    (async () => {
+      const out = document.getElementById('out');
+      let html = 'navigator.xr: ';
+      if (!navigator.xr) { html += '<span class="no">不存在（此浏览器不支持 WebXR）</span>'; out.innerHTML = html; return; }
+      html += '<span class="ok">存在</span><br>';
+      for (const mode of ['immersive-ar', 'immersive-vr', 'inline']) {
+        let ok = false; try { ok = await navigator.xr.isSessionSupported(mode); } catch (e) {}
+        html += mode + ': ' + (ok ? '<span class="ok">✅ 支持</span>' : '<span class="no">✗ 不支持</span>') + '<br>';
+      }
+      out.innerHTML = html;
+    })();
+  </script>
+</body>
+</html>
