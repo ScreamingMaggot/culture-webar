@@ -81,7 +81,13 @@
         this.headOffset = 0; // 弧度
         this.speed = 0.8;
         this.target = document.querySelector('#target');
-        this.hit = document.querySelector('#hitplane');
+        this.hit = document.getElementById('hitplane');
+        const tip = document.getElementById('tip');
+        if (this.target) {
+          tip.textContent = '扫描中…请把打印的识别卡(card.png)平放并对准摄像头';
+          this.target.addEventListener('targetFound', () => { tip.textContent = '✅ 已识别！点桌面任意处，龙马会走过去'; });
+          this.target.addEventListener('targetLost', () => { tip.textContent = '识别卡移出画面了，重新对准'; });
+        }
         this.onLoad = this.onLoad.bind(this);
         this.el.object3D.addEventListener ? null : null;
         const scene = this.el.sceneEl;
