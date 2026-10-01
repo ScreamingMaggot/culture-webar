@@ -60,7 +60,6 @@
     document.getElementById('go').addEventListener('click', async ()=>{
       const chosen=sel.value;const md=navigator.mediaDevices;const orig=md.getUserMedia.bind(md);
       md.getUserMedia=function(c){c=Object.assign({},c);if(c.video)c.video=(chosen&&chosen!==AUTO)?{deviceId:{exact:chosen}}:{facingMode:'environment'};return orig(c);};
-      try{const s=await md.getUserMedia({video:true});s.getTracks().forEach(t=>t.stop());}catch(e){}
       document.body.appendChild(document.getElementById('tpl').content.cloneNode(true));
       document.getElementById('start').style.display='none';
       document.getElementById('panel').style.display='block';
