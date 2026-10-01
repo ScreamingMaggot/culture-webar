@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>文化 WebAR · 开箱验证（Hiro 标版）</title>
+  <script src="./libs/aframe.min.js"></script>
+  <script src="./libs/aframe-ar-nft.js"></script>
+  <style>
+    /* 关键：html/body 不能设不透明背景，否则 AR.js 的 z-index:-1 摄像头视频层会被黑底盖住 */
+    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font-family: system-ui, "Microsoft YaHei", sans-serif; }
+    #badge { position: fixed; top: 10px; left: 10px; z-index: 9999; font-size: 12px; color: #9fe870; background: rgba(0,0,0,.5); padding: 6px 10px; border-radius: 8px; }
+    #launcher { position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; color: #eee; padding: 24px; text-align: center; }
+    #launcher h3 { margin: 0; font-size: 18px; }
+    #launcher .lrow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    #launcher select { padding: 10px 12px; border-radius: 10px; border: 1px solid #444; background: #22252b; color: #eee; font-size: 15px; max-width: 320px; }
+    #camStart { padding: 12px 22px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
+    #camStart:disabled { opacity: .5; }
+    #camStatus { font-size: 13px; color: #ffd479; max-width: 360px; line-height: 1.5; }
+    #hud { position: fixed; left: 0; right: 0; bottom: 0; z-index: 9999; padding: 12px 14px calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0)); color: #fff; text-align: center; }
+    #hud .tip { font-size: 13px; opacity: .85; margin-bottom: 10px; line-height: 1.5; }
+    #hud .btns { display: flex; gap: 10px; justify-content: center; }
+    #hud button { flex: 1; max-width: 140px; padding: 12px 8px; border: 0; border-radius: 12px; font-size: 15px; font-weight: 600; color: #fff; background: #2b2b2b; cursor: pointer; }
+    #hud button.active { background: #2f6fed; }
+    #camRechoose { position: fixed; top: 10px; right: 10px; z-index: 9999; padding: 8px 12px; border: 0; border-radius: 10px; font-size: 13px; color: #fff; background: rgba(0,0,0,.55); cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div id="badge">Hiro 验证模式</div>
+  <button id="camRechoose" style="display:none">重选摄像头</button>
+
+  <!-- 启动层：先选摄像头再建场景（手机多摄/虚拟设备导致默认黑屏时用） -->
+  <div id="launcher">
+    <h3>选择摄像头后开始</h3>
+    <div class="lrow"><label>摄像头</label><select id="camSel"></select></div>
+    <div class="lrow"><button id="camStart" disabled>开始 AR</button></div>
+    <div id="camStatus">正在枚举摄像头…</div>
+  </div>
+
+  <!-- 场景模板：launcher.js 会在选定设备后注入 deviceId 并挂载 -->
+  <template id="scene-tpl">
+    <a-scene embedded vr-mode-ui="enabled: false">
+      <a-marker preset="hiro" id="marker">
+        <a-entity id="culture-slot" position="0 0 0">
+          <a-box color="#e8b64c" depth="0.6" height="0.6" width="0.6" position="0 0.3 0" rotation="0 45 0"
+                 animation="property: rotation; to: 0 405 0; loop: true; dur: 8000; easing: linear"></a-box>
+        </a-entity>
+      </a-marker>
+      <a-entity camera></a-entity>
+    </a-scene>
+  </template>
+
+  <div id="hud">
+    <div class="tip">把打印好的 <b>Hiro 标记</b>（AR.js 示例图案）对准摄像头<br>出现旋转方块即代表 AR 链路跑通</div>
+    <div class="btns">
+      <button data-color="#e8b64c" class="active">展品 A</button>
+      <button data-color="#5aa9e6">展品 B</button>
+      <button data-color="#a4d65e">展品 C</button>
+    </div>
+  </div>
+
+  <script src="./launcher.js"></script>
+  <script>
+    document.addEventListener('ar:launched', () => {
+      document.getElementById('camRechoose').style.display = '';
+      const box = document.querySelector('#culture-slot a-box');
+      document.querySelectorAll('#hud button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#hud button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          if (box) box.setAttribute('color', btn.dataset.color);
+        });
+      });
+    });
+  </script>
+</body>
+</html>

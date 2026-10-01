@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>摄像头预览分诊（纯 video，不含 AR）</title>
+  <style>
+    body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #111; color: #eee; }
+    #wrap { padding: 14px; }
+    video { width: 100%; max-width: 640px; background: #000; border: 1px solid #333; border-radius: 8px; }
+    .row { margin: 10px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    select, button { padding: 8px 12px; border-radius: 8px; border: 1px solid #444; background: #222; color: #eee; font-size: 14px; }
+    #fps { position: fixed; top: 8px; left: 8px; z-index: 99; font: 14px ui-monospace, Consolas, monospace; color: #9fe870; background: rgba(0,0,0,.7); padding: 8px 10px; border-radius: 8px; white-space: pre; }
+    .hint { font-size: 13px; color: #ffd479; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <h3>摄像头预览分诊 · 纯 getUserMedia（不含任何 AR）</h3>
+    <div class="row">
+      <label>设备</label><select id="dev"></select>
+      <label>分辨率</label>
+      <select id="res">
+        <option value="0">自动</option>
+        <option value="320x240">320x240</option>
+        <option value="640x480">640x480</option>
+        <option value="1280x720">1280x720</option>
+        <option value="1920x1080">1920x1080</option>
+      </select>
+      <button id="go">打开</button>
+    </div>
+    <video id="v" autoplay playsinline muted></video>
+    <div class="row"><span id="state">状态：未启动</span></div>
+    <p class="hint">
+      用途：确认"卡顿"是不是浏览器摄像头预览本身的问题。<br>
+      · 若<b>降分辨率后左上角实测 fps 上去了、画面变顺</b> → 是采集模式跑低帧，我把 AR 引擎采集分辨率固定到这一档。<br>
+      · 若<b>各分辨率都卡</b> → 换浏览器（Edge/Firefox/自带）再试；顺了就是 Chrome 这台机的预览合成 bug。<br>
+      · 若<b>换浏览器就顺</b> → 演示/答辩指定用该浏览器。
+    </p>
+  </div>
+  <div id="fps">FPS 初始化…</div>
+  <script>
+    const sel = document.getElementById('dev');
+    const res = document.getElementById('res');
+    const v = document.getElementById('v');
+    const state = document.getElementById('state');
+    const fpsEl = document.getElementById('fps');
+    let stream = null, vfCount = 0, lastT = performance.now();
+
+    // 真实呈现帧率：requestVideoFrameCallback 只在有新帧时触发
+    function bindVFC() {
+      if (v.requestVideoFrameCallback) {
+        const cb = () => { vfCount++; v.requestVideoFrameCallback(cb); };
+        v.requestVideoFrameCallback(cb);
+      }
+    }
+    setInterval(() => {
+      const now = performance.now();
+      const fps = Math.round(vfCount * 1000 / (now - lastT));
+      let s = '实测呈现: ' + (v.requestVideoFrameCallback ? fps : '?') + 'fps';
+      if (stream) { const t = stream.getVideoTracks()[0]; if (t) { const g = t.getSettings(); s += '\ntrack: ' + g.width + 'x' + g.height + '@' + (Math.round(g.frameRate) || '?'); } }
+      fpsEl.textContent = s;
+      vfCount = 0; lastT = now;
+    }, 1000);
+
+    async function list() {
+      try { const tmp = await navigator.mediaDevices.getUserMedia({ video: true }); tmp.getTracks().forEach(t => t.stop()); } catch (e) { state.textContent = '权限失败: ' + e.name; }
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput');
+      sel.replaceChildren();
+      devices.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || ('Camera ' + i); sel.appendChild(o); });
+    }
+
+    async function open() {
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      const video = { facingMode: 'environment' };
+      if (sel.value) video.deviceId = { exact: sel.value };
+      const r = res.value.split('x');
+      if (r.length === 2) { video.width = { ideal: +r[0] }; video.height = { ideal: +r[1] }; }
+      state.textContent = '请求中…';
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video });
+        v.srcObject = stream; bindVFC();
+        const g = stream.getVideoTracks()[0].getSettings();
+        state.textContent = '已开 ' + (stream.getVideoTracks()[0].label || '') + '  ' + g.width + 'x' + g.height + '@' + (Math.round(g.frameRate) || '?');
+      } catch (e) { state.textContent = '失败: ' + e.name + ' ' + e.message; }
+    }
+
+    document.getElementById('go').onclick = open;
+    list().then(open);
+  </script>
+</body>
+</html>

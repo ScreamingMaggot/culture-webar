@@ -1,0 +1,13 @@
+{
+  "name": "culture-webar-demo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "全国仿真创新应用大赛·文化赛道 WebAR 最小 Demo (AR.js + A-Frame 图像追踪)",
+  "type": "module",
+  "scripts": {
+    "start": "node serve.mjs",
+    "start:lan": "node serve.mjs --host 0.0.0.0",
+    "start:https": "node serve.mjs --https --host 0.0.0.0"
+  },
+  "comment_capacitor": "套壳 APK 为后期 P1 步骤，需先装 JDK17 + Android SDK，再 npm i @capacitor/core @capacitor/cli @capacitor/android。当前准备阶段不装。"
+}

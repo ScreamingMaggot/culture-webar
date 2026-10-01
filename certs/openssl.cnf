@@ -1,0 +1,15 @@
+[req]
+distinguished_name = dn
+x509_extensions = v3
+prompt = no
+
+[dn]
+CN = local-webar
+
+[v3]
+subjectAltName = @alt
+
+[alt]
+DNS.1 = localhost
+IP.1  = 127.0.0.1
+IP.2  = 192.168.31.193

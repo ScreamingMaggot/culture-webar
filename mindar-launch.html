@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>MindAR 竖屏对照（选摄像头·改写deviceId）</title>
+  <script src="./libs/aframe.min.js"></script>
+  <script src="./libs/mindar-image-aframe.prod.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: transparent; font-family: system-ui, "Microsoft YaHei", sans-serif; }
+    #start { position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; color: #eee; text-align: center; padding: 24px; }
+    #start h3 { margin: 0; }
+    #start .t { font-size: 13px; color: #ffd479; line-height: 1.6; }
+    #start .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    select { padding: 10px 12px; border-radius: 10px; border: 1px solid #444; background: #22252b; color: #eee; font-size: 15px; max-width: 300px; }
+    #go { padding: 14px 26px; border: 0; border-radius: 12px; font-size: 17px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
+    #status { font-size: 13px; color: #9fe870; }
+  </style>
+</head>
+<body>
+  <div id="start">
+    <h3>MindAR 竖屏对照</h3>
+    <div class="t">打印 <a href="./mindar/card.png" style="color:#9fe870">mindar/card.png</a> 对准摄像头。<br>选摄像头后点启动（把 MindAR 写死的 facingMode 改写成显式 deviceId，绕开夸克卡摄像头）。</div>
+    <div class="row"><label>摄像头</label><select id="cam"></select></div>
+    <button id="go">启动摄像头</button>
+    <div id="status">正在枚举…</div>
+  </div>
+
+  <template id="tpl">
+    <a-scene
+      mindar-image="imageTargetSrc: ./mindar/card.mind;"
+      embedded color-space="sRGB" renderer="colorManagement: true"
+      vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      <a-entity mindar-image-target="targetIndex: 0">
+        <a-box color="#e8b64c" depth="0.3" height="0.3" width="0.3" position="0 0.2 0" rotation="0 45 0"
+               animation="property: rotation; to: 0 405 0; loop: true; dur: 6000; easing: linear"></a-box>
+      </a-entity>
+    </a-scene>
+  </template>
+
+  <script>
+    const AUTO = '__auto__';
+    const sel = document.getElementById('cam');
+    const status = document.getElementById('status');
+    const BAD = /privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
+    const score = (d) => { const l = (d.label || '').toLowerCase(); if (BAD.test(l)) return -10; if (/back|environment|rear|后置|主摄|wide/i.test(l)) return 30; if (/front|user|face|前置/i.test(l)) return 5; return 20; };
+
+    async function list() {
+      let devs = [];
+      try { devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch (e) {}
+      sel.replaceChildren();
+      const o0 = document.createElement('option'); o0.value = AUTO; o0.textContent = '自动(默认)'; sel.appendChild(o0);
+      devs.sort((a, b) => score(b) - score(a));
+      devs.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || ('摄像头 ' + i); sel.appendChild(o); });
+      if (devs[0]) sel.value = devs[0].deviceId;
+      status.textContent = '发现 ' + devs.length + ' 个摄像头（标签为空正常，启动授权后即可）';
+    }
+
+    document.getElementById('go').addEventListener('click', () => {
+      const chosen = sel.value;
+      // 关键：MindAR 内部写死 facingMode:'environment'，夸克会卡；改写 getUserMedia 用显式 deviceId
+      const md = navigator.mediaDevices;
+      const orig = md.getUserMedia.bind(md);
+      md.getUserMedia = function (constraints) {
+        const c = Object.assign({}, constraints);
+        if (c.video) c.video = (chosen && chosen !== AUTO) ? { deviceId: { exact: chosen } } : true;
+        return orig(c);
+      };
+      document.body.appendChild(document.getElementById('tpl').content.cloneNode(true));
+      document.getElementById('start').style.display = 'none';
+      status.textContent = '已启动';
+    });
+
+    list();
+  </script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+certs/*.pem
+certs/key.pem
+certs/cert.pem
+node_modules/
+*.pem
+.DS_Store

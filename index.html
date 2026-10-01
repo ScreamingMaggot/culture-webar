@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>文化 WebAR · MindAR 生产版</title>
+  <script src="./libs/aframe.min.js"></script>
+  <script src="./libs/mindar-image-aframe.prod.js"></script>
+  <style>
+    /* 关键：html/body 不能设不透明背景，否则摄像头视频层被黑底盖住 */
+    html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; font-family: system-ui, "Microsoft YaHei", sans-serif; }
+    #start { position: fixed; inset: 0; z-index: 10000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; color: #eee; text-align: center; padding: 24px; }
+    #start h3 { margin: 0; }
+    #start .t { font-size: 13px; color: #ffd479; line-height: 1.6; }
+    #start .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    #start select { padding: 10px 12px; border-radius: 10px; border: 1px solid #444; background: #22252b; color: #eee; font-size: 15px; max-width: 300px; }
+    #go { padding: 14px 26px; border: 0; border-radius: 12px; font-size: 17px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
+    #status { font-size: 13px; color: #9fe870; }
+    #hud { position: fixed; left: 0; right: 0; bottom: 0; z-index: 9999; display: none; padding: 12px 14px calc(14px + env(safe-area-inset-bottom)); background: linear-gradient(to top, rgba(0,0,0,.72), rgba(0,0,0,0)); color: #fff; text-align: center; }
+    #hud .title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    #hud .desc { font-size: 13px; opacity: .85; margin-bottom: 10px; line-height: 1.5; min-height: 38px; }
+    #hud .btns { display: flex; gap: 10px; justify-content: center; }
+    #hud button { flex: 1; max-width: 140px; padding: 12px 8px; border: 0; border-radius: 12px; font-size: 15px; font-weight: 600; color: #fff; background: #2b2b2b; cursor: pointer; }
+    #hud button.active { background: #2f6fed; }
+    #rechoose { position: fixed; top: 10px; right: 10px; z-index: 9999; display: none; padding: 8px 12px; border: 0; border-radius: 10px; font-size: 13px; color: #fff; background: rgba(0,0,0,.55); cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div id="start">
+    <h3>文化 WebAR</h3>
+    <div class="t">选摄像头后点启动。<br>（启动时把 MindAR 写死的 facingMode 改写成显式 deviceId，绕开部分浏览器卡摄像头的问题）</div>
+    <div class="row"><label>摄像头</label><select id="cam"></select></div>
+    <button id="go">启动 AR</button>
+    <div id="status">正在枚举摄像头…</div>
+  </div>
+  <button id="rechoose">重选摄像头</button>
+
+  <!--
+    生产版接入真实文化内容：
+    1) 用 MindAR Image Editor 从你的文化识别图生成 .mind，替换 imageTargetSrc（默认用官方 card.mind 占位）。
+    2) 单个 .mind 可含多张识别图：多放几个 <a-entity mindar-image-target="targetIndex: N">，每张图各挂它的模型。
+    3) 模型用低面数 .glb：<a-entity gltf-model="./assets/model-a.glb" animation-mixer scale="..."></a-entity>
+    下面默认演示"单目标 + 按钮切换 3 件展品"（占位方块，换成 gltf 即可）。
+  -->
+  <template id="tpl">
+    <a-scene
+      mindar-image="imageTargetSrc: ./mindar/card.mind;"
+      embedded color-space="sRGB" renderer="colorManagement: true"
+      vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      <a-entity mindar-image-target="targetIndex: 0">
+        <a-entity id="culture-slot" position="0 0 0" scale="0.5 0.5 0.5">
+          <a-box id="ph-box" color="#e8b64c" depth="0.3" height="0.3" width="0.3" position="0 0.2 0" rotation="0 45 0"
+                 animation="property: rotation; to: 0 405 0; loop: true; dur: 6000; easing: linear"></a-box>
+        </a-entity>
+      </a-entity>
+    </a-scene>
+  </template>
+
+  <div id="hud">
+    <div class="title" id="t">展品 A</div>
+    <div class="desc" id="d">对准识别图后，模型悬浮显示。此处替换为对应文化介绍。</div>
+    <div class="btns">
+      <button data-name="展品 A" data-desc="对应文化介绍文案 A" data-color="#e8b64c" class="active">展品 A</button>
+      <button data-name="展品 B" data-desc="对应文化介绍文案 B" data-color="#5aa9e6">展品 B</button>
+      <button data-name="展品 C" data-desc="对应文化介绍文案 C" data-color="#a4d65e">展品 C</button>
+    </div>
+  </div>
+
+  <script>
+    const AUTO = '__auto__';
+    const sel = document.getElementById('cam');
+    const status = document.getElementById('status');
+    const BAD = /privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
+    const score = (d) => { const l = (d.label || '').toLowerCase(); if (BAD.test(l)) return -10; if (/back|environment|rear|后置|主摄|wide/i.test(l)) return 30; if (/front|user|face|前置/i.test(l)) return 5; return 20; };
+    let sceneEl = null;
+
+    async function list() {
+      let devs = [];
+      try { devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch (e) {}
+      sel.replaceChildren();
+      const o0 = document.createElement('option'); o0.value = AUTO; o0.textContent = '自动(默认)'; sel.appendChild(o0);
+      devs.sort((a, b) => score(b) - score(a));
+      devs.forEach((d, i) => { const o = document.createElement('option'); o.value = d.deviceId; o.textContent = d.label || ('摄像头 ' + i); sel.appendChild(o); });
+      if (devs[0]) sel.value = devs[0].deviceId;
+      status.textContent = '发现 ' + devs.length + ' 个摄像头';
+    }
+
+    function launch() {
+      const chosen = sel.value;
+      const md = navigator.mediaDevices;
+      const orig = md.getUserMedia.bind(md);
+      md.getUserMedia = function (constraints) {
+        const c = Object.assign({}, constraints);
+        if (c.video) c.video = (chosen && chosen !== AUTO) ? { deviceId: { exact: chosen } } : true;
+        return orig(c);
+      };
+      document.body.appendChild(document.getElementById('tpl').content.cloneNode(true));
+      sceneEl = document.querySelector('a-scene');
+      document.getElementById('start').style.display = 'none';
+      document.getElementById('hud').style.display = 'block';
+      document.getElementById('rechoose').style.display = 'block';
+      wireHud();
+    }
+
+    function rechoose() {
+      if (sceneEl && sceneEl.parentNode) sceneEl.parentNode.removeChild(sceneEl);
+      sceneEl = null;
+      document.getElementById('start').style.display = 'flex';
+      document.getElementById('hud').style.display = 'none';
+      document.getElementById('rechoose').style.display = 'none';
+      list();
+    }
+
+    function wireHud() {
+      const box = document.getElementById('ph-box');
+      const t = document.getElementById('t'), d = document.getElementById('d');
+      document.querySelectorAll('#hud button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#hud button').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          t.textContent = btn.dataset.name; d.textContent = btn.dataset.desc;
+          // 换成真实模型时：改 culture-slot 里的 gltf-model src 为对应 .glb
+          if (box) box.setAttribute('color', btn.dataset.color);
+        });
+      });
+    }
+
+    document.getElementById('go').addEventListener('click', launch);
+    document.getElementById('rechoose').addEventListener('click', rechoose);
+    list();
+  </script>
+</body>
+</html>

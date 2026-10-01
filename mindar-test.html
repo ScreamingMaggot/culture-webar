@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>MindAR 对照（显示/检测解耦）</title>
+  <script src="./libs/aframe.min.js"></script>
+  <script src="./libs/mindar-image-aframe.prod.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: transparent; font-family: system-ui, "Microsoft YaHei", sans-serif; }
+    #note { position: fixed; top: 8px; left: 8px; right: 8px; z-index: 9999; font-size: 12px; color: #ffd479; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; line-height: 1.5; }
+    #note a { color: #9fe870; }
+  </style>
+</head>
+<body>
+  <div id="note">MindAR 对照页：打印 <a href="./mindar/card.png" download>mindar/card.png</a> 这张官方示例卡，对准摄像头。若这里画面顺、AR.js 卡，就坐实是 AR.js 视频管线的问题，主引擎切 MindAR。</div>
+
+  <a-scene
+    mindar-image="imageTargetSrc: ./mindar/card.mind; uiScanning: auto;"
+    embedded color-space="sRGB" renderer="colorManagement: true"
+    vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+    <a-entity mindar-image-target="targetIndex: 0">
+      <a-box color="#e8b64c" depth="0.3" height="0.3" width="0.3" position="0 0.2 0" rotation="0 45 0"
+             animation="property: rotation; to: 0 405 0; loop: true; dur: 6000; easing: linear"></a-box>
+    </a-entity>
+  </a-scene>
+</body>
+</html>

@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>AR.js 官方同款最小示例（对照组）</title>
+  <!-- 与 AR.js 官方 marker 示例一致：只引库 + 一个静态 a-scene，不加任何自定义 -->
+  <script src="./libs/aframe.min.js"></script>
+  <script src="./libs/aframe-ar-nft.js"></script>
+</head>
+<body style="margin:0">
+  <a-scene embedded arjs="sourceType: webcam; debugUIEnabled: false;">
+    <a-marker preset="hiro">
+      <a-box position="0 0.5 0" material="color: yellow; metalness: 0.2;"></a-box>
+    </a-marker>
+    <a-entity camera></a-entity>
+  </a-scene>
+
+  <!-- 只读探针：不干预渲染，只每秒读摄像头 track 的实时帧率 + rAF 帧率 -->
+  <div id="m" style="position:fixed;top:8px;left:8px;z-index:99999;font:12px monospace;color:#0f0;background:rgba(0,0,0,.6);padding:6px;border-radius:6px;white-space:pre"></div>
+  <script>
+    (function () {
+      const m = document.getElementById('m');
+      let raf = 0, rafMark = performance.now(), rafCount = 0;
+      let vfc = 0, vfcBound = null;
+      function loop(now) {
+        rafCount++;
+        if (now - rafMark >= 1000) { raf = Math.round(rafCount * 1000 / (now - rafMark)); rafCount = 0; rafMark = now; show(); }
+        requestAnimationFrame(loop);
+      }
+      function bindVideo() {
+        const v = document.querySelector('video');
+        if (v && v !== vfcBound) {
+          vfcBound = v;
+          if (v.requestVideoFrameCallback) {
+            const cb = () => { vfc++; v.requestVideoFrameCallback(cb); };
+            v.requestVideoFrameCallback(cb);
+          }
+        }
+        if (!vfcBound) setTimeout(bindVideo, 400);
+      }
+      bindVideo();
+      function show() {
+        const v = vfcBound;
+        let cam = 'no<video>';
+        if (v && v.srcObject && v.srcObject.getVideoTracks && v.srcObject.getVideoTracks()[0]) {
+          const t = v.srcObject.getVideoTracks()[0], s = t.getSettings();
+          cam = 'track请求 ' + (Math.round(s.frameRate) || '?') + 'fps  ' + s.width + 'x' + s.height + '  真呈现 ' + vfc + 'fps';
+        }
+        let glr = '?';
+        try {
+          const c = document.createElement('canvas');
+          const gl = c.getContext('webgl2') || c.getContext('webgl');
+          if (gl) { const d = gl.getExtension('WEBGL_debug_renderer_info'); glr = d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); }
+        } catch (e) { glr = 'err'; }
+        m.textContent = 'rAF ' + raf + 'fps\n' + cam + '\nGL: ' + String(glr).slice(0, 60);
+        vfc = 0;
+      }
+      requestAnimationFrame(loop);
+      setTimeout(show, 1500);
+    })();
+  </script>
+</body>
+</html>
