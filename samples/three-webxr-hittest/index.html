@@ -1,15 +1,23 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 	<head>
-		<title>three.js ar - hit test</title>
+		<title>龙马 AR · WebXR 桌面（基于 three.js 官方 hit-test）</title>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 		<link type="text/css" rel="stylesheet" href="main.css">
+		<style>
+			#hint { position: fixed; top: 8px; left: 8px; right: 8px; z-index: 9; font: 13px system-ui,"Microsoft YaHei",sans-serif; color:#9fe870; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; }
+			#cfg { position: fixed; bottom: 60px; left: 8px; right: 8px; z-index: 9; font: 13px system-ui,"Microsoft YaHei",sans-serif; color:#eee; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; }
+			#cfg input { width: 70px; }
+		</style>
 	</head>
 	<body>
-
-		<div id="info">
-			<a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> ar - hit test<br/>(Chrome Android 81+)
+		<div id="hint">扫桌面→出现圆环→点屏幕放置龙马；再点别处，龙马走过去、头朝行进方向。（用支持 WebXR 的浏览器，如手机 Edge / Chrome）</div>
+		<div id="cfg">
+			缩放 <input id="scale" type="range" min="0.01" max="0.08" step="0.005" value="0.03">
+			速度 <input id="speed" type="range" min="0.05" max="0.6" step="0.05" value="0.15">
+			朝向偏移° <input id="head" type="range" min="0" max="360" step="15" value="0">
+			<span id="status">加载模型中…</span>
 		</div>
 
 		<script type="importmap">
@@ -25,33 +33,28 @@
 
 			import * as THREE from 'three';
 			import { ARButton } from 'three/addons/webxr/ARButton.js';
+			import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+			import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 
-			let container;
-			let camera, scene, renderer;
-			let controller;
+			let container, camera, scene, renderer, controller, reticle;
+			let hitTestSource = null, hitTestSourceRequested = false;
 
-			let reticle;
-
-			let hitTestSource = null;
-			let hitTestSourceRequested = false;
+			let horse = null, horseReady = false, placed = false, moving = false;
+			const cur = new THREE.Vector3(), target = new THREE.Vector3();
+			let speed = 0.15, headOffset = 0;
+			let last = 0;
 
 			init();
 			animate();
 
 			function init() {
-
 				container = document.createElement( 'div' );
 				document.body.appendChild( container );
-
 				scene = new THREE.Scene();
-
 				camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 20 );
-
 				const light = new THREE.HemisphereLight( 0xffffff, 0xbbbbff, 3 );
 				light.position.set( 0.5, 1, 0.25 );
 				scene.add( light );
-
-				//
 
 				renderer = new THREE.WebGLRenderer( { antialias: true, alpha: true } );
 				renderer.setPixelRatio( window.devicePixelRatio );
@@ -59,116 +62,101 @@
 				renderer.xr.enabled = true;
 				container.appendChild( renderer.domElement );
 
-				//
-
 				document.body.appendChild( ARButton.createButton( renderer, { requiredFeatures: [ 'hit-test' ] } ) );
 
-				//
+				// 加载龙马（draco 压缩）
+				const draco = new DRACOLoader();
+				draco.setDecoderPath( './libs/jsm/libs/draco/gltf/' );
+				const loader = new GLTFLoader();
+				loader.setDRACOLoader( draco );
+				const scaleEl = document.getElementById('scale'), speedEl = document.getElementById('speed'), headEl = document.getElementById('head'), statusEl = document.getElementById('status');
+				const q = new URLSearchParams(location.search);
+				if (q.get('scale')) scaleEl.value = q.get('scale');
+				if (q.get('speed')) speedEl.value = q.get('speed');
+				if (q.get('head')) headEl.value = q.get('head');
+				const applyCfg = () => { speed = +speedEl.value; headOffset = (+headEl.value) * Math.PI / 180; if (horse) horse.scale.setScalar(+scaleEl.value); };
+				scaleEl.addEventListener('input', applyCfg); speedEl.addEventListener('input', applyCfg); headEl.addEventListener('input', applyCfg);
 
-				const geometry = new THREE.CylinderGeometry( 0.1, 0.1, 0.2, 32 ).translate( 0, 0.1, 0 );
-
-				function onSelect() {
-
-					if ( reticle.visible ) {
-
-						const material = new THREE.MeshPhongMaterial( { color: 0xffffff * Math.random() } );
-						const mesh = new THREE.Mesh( geometry, material );
-						reticle.matrix.decompose( mesh.position, mesh.quaternion, mesh.scale );
-						mesh.scale.y = Math.random() * 2 + 1;
-						scene.add( mesh );
-
-					}
-
-				}
+				loader.load( '../../assets/longma.min.glb', function ( gltf ) {
+					horse = gltf.scene;
+					horse.scale.setScalar( +scaleEl.value );
+					horse.visible = false;
+					scene.add( horse );
+					horseReady = true;
+					applyCfg();
+					statusEl.textContent = '✅ 模型就绪：扫桌面→出现圆环→点屏幕放置';
+				}, undefined, function () { statusEl.textContent = '❌ 模型加载失败'; } );
 
 				controller = renderer.xr.getController( 0 );
 				controller.addEventListener( 'select', onSelect );
 				scene.add( controller );
 
 				reticle = new THREE.Mesh(
-					new THREE.RingGeometry( 0.15, 0.2, 32 ).rotateX( - Math.PI / 2 ),
-					new THREE.MeshBasicMaterial()
+					new THREE.RingGeometry( 0.08, 0.1, 32 ).rotateX( - Math.PI / 2 ),
+					new THREE.MeshBasicMaterial( { color: 0x2f6fed } )
 				);
 				reticle.matrixAutoUpdate = false;
 				reticle.visible = false;
 				scene.add( reticle );
 
-				//
-
 				window.addEventListener( 'resize', onWindowResize );
+			}
 
+			function onSelect() {
+				if ( ! horseReady || ! reticle.visible ) return;
+				const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+				reticle.matrix.decompose( p, q, s );
+				if ( ! placed ) {
+					cur.copy( p ); horse.position.copy( p ); horse.visible = true; placed = true;
+				} else {
+					target.copy( p ); moving = true;
+				}
+			}
+
+			function updateHorse( dt ) {
+				if ( ! moving ) return;
+				const dx = target.x - cur.x, dz = target.z - cur.z, dist = Math.hypot( dx, dz );
+				if ( dist < 0.01 ) { moving = false; return; }
+				const step = Math.min( speed * dt, dist ), nx = dx / dist, nz = dz / dist;
+				cur.x += nx * step; cur.z += nz * step;
+				horse.position.set( cur.x, cur.y, cur.z );
+				horse.rotation.y = Math.atan2( nz, - nx ) + headOffset; // 头(模型 -X)朝行进方向
 			}
 
 			function onWindowResize() {
-
 				camera.aspect = window.innerWidth / window.innerHeight;
 				camera.updateProjectionMatrix();
-
 				renderer.setSize( window.innerWidth, window.innerHeight );
-
 			}
 
-			//
-
-			function animate() {
-
-				renderer.setAnimationLoop( render );
-
-			}
+			function animate() { renderer.setAnimationLoop( render ); }
 
 			function render( timestamp, frame ) {
-
+				const dt = last ? Math.min( ( timestamp - last ) / 1000, 0.05 ) : 0;
+				last = timestamp;
 				if ( frame ) {
-
 					const referenceSpace = renderer.xr.getReferenceSpace();
 					const session = renderer.xr.getSession();
-
 					if ( hitTestSourceRequested === false ) {
-
 						session.requestReferenceSpace( 'viewer' ).then( function ( referenceSpace ) {
-
-							session.requestHitTestSource( { space: referenceSpace } ).then( function ( source ) {
-
-								hitTestSource = source;
-
-							} );
-
+							session.requestHitTestSource( { space: referenceSpace } ).then( function ( source ) { hitTestSource = source; } );
 						} );
-
-						session.addEventListener( 'end', function () {
-
-							hitTestSourceRequested = false;
-							hitTestSource = null;
-
-						} );
-
+						session.addEventListener( 'end', function () { hitTestSourceRequested = false; hitTestSource = null; } );
 						hitTestSourceRequested = true;
-
 					}
-
 					if ( hitTestSource ) {
-
 						const hitTestResults = frame.getHitTestResults( hitTestSource );
-
 						if ( hitTestResults.length ) {
-
 							const hit = hitTestResults[ 0 ];
-
 							reticle.visible = true;
 							reticle.matrix.fromArray( hit.getPose( referenceSpace ).transform.matrix );
-
 						} else {
-
 							reticle.visible = false;
-
 						}
-
 					}
-
 				}
-
+				updateHorse( dt );
 				renderer.render( scene, camera );
-
 			}
 
 		</script>
