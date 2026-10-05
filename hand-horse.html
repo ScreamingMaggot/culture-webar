@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>龙马 · 张开手掌站在掌心</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #eee; font-family: system-ui, "Microsoft YaHei", sans-serif; overflow: hidden; }
+    #v { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; transform: scaleX(-1); }
+    #gl { position: fixed; inset: 0; z-index: 1; width: 100%; height: 100%; }
+    #hud { position: fixed; top: 8px; left: 8px; right: 8px; z-index: 9; font: 14px system-ui,"Microsoft YaHei",sans-serif; color: #9fe870; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; }
+    #start { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; text-align: center; padding: 24px; }
+    #start select { padding: 10px; border-radius: 10px; background: #22252b; color: #eee; border: 1px solid #444; }
+    #start button { padding: 14px 26px; border: 0; border-radius: 12px; font-size: 17px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
+    #start .hint { font-size: 13px; color: #ffd479; max-width: 360px; line-height: 1.6; }
+    #panel { position: fixed; bottom: 8px; left: 8px; right: 8px; z-index: 9; display: none; font-size: 12px; color: #eee; background: rgba(0,0,0,.5); padding: 6px 8px; border-radius: 8px; }
+    #panel input[type=range]{ width: 90px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <video id="v" autoplay playsinline muted></video>
+  <canvas id="gl"></canvas>
+  <div id="hud">正在加载…</div>
+
+  <div id="start">
+    <h3>龙马 · 张开手掌站在掌心</h3>
+    <div class="hint">启动摄像头（建议用前置）→ 对着镜头<b>张开五指</b> → 龙马会实时站在你掌心上、跟着手走。</div>
+    <select id="cam"></select>
+    <button id="go">启动摄像头</button>
+  </div>
+
+  <div id="panel">
+    大小 <input id="sScale" type="range" min="0.2" max="3" step="0.05" value="1">
+    转正 <input id="sYaw" type="range" min="0" max="360" step="15" value="90">
+    俯仰° <input id="sPitch" type="range" min="-60" max="60" step="5" value="-20">
+  </div>
+
+  <script type="importmap">
+  { "imports": {
+    "three": "./samples/three-webxr-hittest/libs/three.module.js",
+    "three/addons/": "./samples/three-webxr-hittest/libs/jsm/"
+  } }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+
+    const AUTO='__auto__', sel=document.getElementById('cam');
+    const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
+    // 优先前置（手部自拍视角）
+    const score=d=>{const l=(d.label||'').toLowerCase();if(BAD.test(l))return -10;if(/front|user|face|前置/i.test(l))return 40;if(/back|environment|rear|后置/i.test(l))return 20;return 25;};
+    async function list(){let d=[];try{d=(await navigator.mediaDevices.enumerateDevices()).filter(x=>x.kind==='videoinput');}catch(e){}
+      sel.replaceChildren();const o0=document.createElement('option');o0.value=AUTO;o0.textContent='自动';sel.appendChild(o0);
+      d.sort((a,b)=>score(b)-score(a));d.forEach((x,i)=>{const o=document.createElement('option');o.value=x.deviceId;o.textContent=x.label||('摄像头'+i);sel.appendChild(o);});if(d[0])sel.value=d[0].deviceId;}
+    list();
+
+    const hud=document.getElementById('hud');
+    const video=document.getElementById('v');
+    const canvas=document.getElementById('gl');
+    const md=navigator.mediaDevices, orig=md.getUserMedia.bind(md);
+    let chosenDevice=null;
+    md.getUserMedia=function(c){c=Object.assign({},c); if(c.video) c.video=(chosenDevice&&chosenDevice!==AUTO)?{deviceId:{exact:chosenDevice}}:true; return orig(c);};
+
+    // ---- three.js 场景（透明，叠在视频上）----
+    const renderer=new THREE.WebGLRenderer({canvas, alpha:true, antialias:true});
+    renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+    const scene=new THREE.Scene();
+    const fov=60;
+    const camera=new THREE.PerspectiveCamera(fov, innerWidth/innerHeight, 0.01, 100);
+    camera.position.set(0,0,1); camera.lookAt(0,0,0);
+    scene.add(new THREE.HemisphereLight(0xffffff,0xbbbbff,3));
+    const dl=new THREE.DirectionalLight(0xffffff,1.2); dl.position.set(0.5,1,1); scene.add(dl);
+
+    function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
+    addEventListener('resize', resize); resize();
+
+    let horse=null, baseScale=1, yawDeg=90, pitchDeg=-20;
+    const draco=new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
+    const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
+    loader.load('./assets/longma.min.glb', g=>{
+      horse=g.scene; horse.visible=false; scene.add(horse);
+      // 归一化：把模型缩放到"高度≈1单位"
+      const box=new THREE.Box3().setFromObject(horse); const size=new THREE.Vector3(); box.getSize(size);
+      baseScale=1/Math.max(size.x,size.y,size.z);
+      hud.textContent='✅ 模型就绪：张开五指试试';
+    }, undefined, ()=>{ hud.textContent='❌ 模型加载失败'; });
+
+    document.getElementById('sScale').addEventListener('input',e=>{});
+    document.getElementById('sYaw').addEventListener('input',e=>{ yawDeg=+e.target.value; });
+    document.getElementById('sPitch').addEventListener('input',e=>{ pitchDeg=+e.target.value; });
+
+    // 屏幕(归一化) → z=0 平面的世界坐标
+    function screenToWorld(nx, ny){
+      const h=Math.tan(fov/2*Math.PI/180), w=h*camera.aspect;
+      return new THREE.Vector3((nx*2-1)*w, (1-ny*2)*h, 0);
+    }
+
+    const smoothPos=new THREE.Vector3(); let haveSmooth=false, visible=false;
+
+    document.getElementById('go').addEventListener('click', async ()=>{
+      chosenDevice=sel.value;
+      let stream; try{ stream=await md.getUserMedia({video:true}); }catch(e){ hud.textContent='摄像头失败: '+e.name; return; }
+      video.srcObject=stream; await video.play().catch(()=>{});
+      document.getElementById('start').style.display='none';
+      document.getElementById('panel').style.display='block';
+      hud.textContent='加载手势模型…';
+      const { GestureRecognizer, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
+      const vision=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+      const modelPath='https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
+      let gr; try{ gr=await GestureRecognizer.createFromOptions(vision,{baseOptions:{modelAssetPath:modelPath,delegate:'GPU'},runningMode:'VIDEO',numHands:1}); }
+      catch(e){ gr=await GestureRecognizer.createFromOptions(vision,{baseOptions:{modelAssetPath:modelPath},runningMode:'VIDEO',numHands:1}); }
+      hud.textContent='张开五指，让龙马站到掌心';
+      let lastT=-1;
+      (function loop(){
+        requestAnimationFrame(loop);
+        const now=performance.now();
+        if(video.readyState<2 || video.currentTime===lastT) { renderer.render(scene,camera); return; }
+        lastT=video.currentTime;
+        let res=null; try{ res=gr.recognizeForVideo(video, now); }catch(e){}
+        renderer.render(scene,camera);
+        if(!res || !horse) return;
+        const hand=res.landmarks && res.landmarks[0];
+        const g=res.gestures && res.gestures[0] && res.gestures[0][0];
+        const open=g && /Open_Palm/i.test(g.categoryName) && g.score>0.4;
+        if(hand && open){
+          // 掌心 = 各掌指关节平均；大小 = 腕(0)到中指根(9)距离
+          const ids=[0,5,9,13,17]; let cx=0, cy=0; for(const i of ids){ cx+=hand[i].x; cy+=hand[i].y; } cx/=ids.length; cy/=ids.length;
+          const palm=Math.hypot(hand[9].x-hand[0].x, hand[9].y-hand[0].y);
+          // 镜像（前置预览用了 scaleX(-1)）
+          const nx=1-cx, ny=cy;
+          const wp=screenToWorld(nx, ny);
+          if(!haveSmooth){ smoothPos.copy(wp); haveSmooth=true; }
+          else smoothPos.lerp(wp, 0.4);
+          const scale=baseScale * palm * 2.2; // 手掌越大模型越大
+          horse.position.copy(smoothPos);
+          horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
+          horse.rotation.set(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0);
+          horse.visible=true;
+          hud.textContent='✅ 龙马在掌心';
+        } else {
+          if(horse) horse.visible=false;
+          hud.textContent = g ? ('手势: '+g.categoryName+' — 请张开五指') : '张开五指，让龙马站到掌心';
+        }
+      })();
+    });
+  </script>
+</body>
+</html>
