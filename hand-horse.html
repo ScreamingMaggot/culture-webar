@@ -129,14 +129,14 @@
         const g=res.gestures && res.gestures[0] && res.gestures[0][0];
         const open=g && /Open_Palm/i.test(g.categoryName) && g.score>0.4;
         if(hand && open){
-          // 掌心 = 各掌指关节平均；大小 = 腕(0)到中指根(9)距离
-          const ids=[0,5,9,13,17]; let cx=0, cy=0; for(const i of ids){ cx+=hand[i].x; cy+=hand[i].y; } cx/=ids.length; cy/=ids.length;
+          // 掌心 ≈ 腕(0) 与 中指根(9) 的中点（比"指根均值"靠下，避免偏高）
+          let cx=(hand[0].x+hand[9].x)/2, cy=(hand[0].y+hand[9].y)/2;
           const palm=Math.hypot(hand[9].x-hand[0].x, hand[9].y-hand[0].y);
           // 镜像（前置预览用了 scaleX(-1)）
           const nx=1-cx, ny=cy;
           const wp=screenToWorld(nx, ny);
           if(!haveSmooth){ smoothPos.copy(wp); haveSmooth=true; }
-          else smoothPos.lerp(wp, 0.4);
+          else smoothPos.lerp(wp, 0.7);
           const scale=baseScale * palm * 1.4; // 手掌越大模型越大(收在掌心内)
           horse.position.copy(smoothPos);
           horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
@@ -156,7 +156,7 @@
           const off = new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0));
           q.multiply(off);
           const qOK = Number.isFinite(q.x)&&Number.isFinite(q.y)&&Number.isFinite(q.z)&&Number.isFinite(q.w);
-          if(qOK) horse.quaternion.slerp(q, 0.35);                 // 仅在有限时更新
+          if(qOK) horse.quaternion.slerp(q, 0.6);                 // 仅在有限时更新(灵敏度提高)
           if(Number.isFinite(scale) && scale>1e-6){ horse.scale.setScalar(scale * (+document.getElementById('sScale').value)); }
           horse.visible=true;
           window.__dbg = { scale:+ (scale||0).toFixed(4), palm:+palm.toFixed(3), qOK, pos:[+smoothPos.x.toFixed(2),+smoothPos.y.toFixed(2),+smoothPos.z.toFixed(2)] };
