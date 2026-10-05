@@ -136,9 +136,21 @@
           const scale=baseScale * palm * 2.2; // 手掌越大模型越大
           horse.position.copy(smoothPos);
           horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
-          horse.rotation.set(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0);
+          // ---- 朝向跟随手心 ----
+          const V=(i)=> new THREE.Vector3(1-hand[i].x, hand[i].y, hand[i].z); // 镜像x与前视一致
+          const wrist=V(0), iMCP=V(5), pMCP=V(17), mMCP=V(9);
+          const up = mMCP.clone().sub(wrist).normalize();        // 腕->中指：掌"上"
+          const across = pMCP.clone().sub(iMCP).normalize();     // 食指->小指：掌"横"
+          let fwd = new THREE.Vector3().crossVectors(across, up).normalize(); // 掌心法线
+          if(fwd.z < 0) fwd.negate();                             // 让法线朝相机
+          const xAxis = new THREE.Vector3().crossVectors(up, fwd).normalize();
+          const zAxis = new THREE.Vector3().crossVectors(xAxis, up).normalize();
+          const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, up, zAxis));
+          const off = new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0));
+          q.multiply(off); // 滑杆作局部修正
+          horse.quaternion.slerp(q, 0.35);                        // 平滑跟随
           horse.visible=true;
-          hud.textContent='✅ 龙马在掌心';
+          hud.textContent='✅ 龙马在掌心（跟随手心朝向）';
         } else {
           if(horse) horse.visible=false;
           hud.textContent = g ? ('手势: '+g.categoryName+' — 请张开五指') : '张开五指，让龙马站到掌心';
