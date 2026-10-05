@@ -140,23 +140,27 @@
           const scale=baseScale * palm * 1.4; // 手掌越大模型越大(收在掌心内)
           horse.position.copy(smoothPos);
           horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
-          // ---- 朝向：3D 跟随手心（+Y=腕→中指；-X(头)=掌心法线）----
-          const dw = (i,j)=> new THREE.Vector3(-(hand[i].x-hand[j].x), -(hand[i].y-hand[j].y), -(hand[i].z-hand[j].z));
-          const yAxis = dw(9,0).normalize();                       // 模型 +Y = 腕→中指(3D)
-          const across = dw(17,5).normalize();                     // 掌横 食指→小指
-          let n = new THREE.Vector3().crossVectors(across, yAxis);
-          if(n.lengthSq()<1e-9) n.set(0,0,1);
-          n.normalize(); if(n.z < 0) n.negate();                   // 掌心法线朝相机为正
-          let xAxis = n.clone().negate();                          // 模型 -X(头) = 法线 ⇒ 头朝手心方向
-          xAxis.sub(yAxis.clone().multiplyScalar(xAxis.dot(yAxis))); // 正交化
-          if(xAxis.lengthSq()<1e-6) xAxis.set(0,0,-1); else xAxis.normalize();
-          const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+          // ---- 朝向：3D 跟随手心（+Y=腕→中指；-X(头)=掌心法线），全程容错 ----
+          const dw = (i,j)=>{ const v=new THREE.Vector3(-(hand[i].x-hand[j].x), -(hand[i].y-hand[j].y), -(Number.isFinite(hand[i].z)&&Number.isFinite(hand[j].z)?hand[i].z-hand[j].z:0)); return v; };
+          const yAxis = dw(9,0); if(!Number.isFinite(yAxis.x)||yAxis.lengthSq()<1e-9) yAxis.set(0,1,0); yAxis.normalize();
+          const across = dw(17,5); if(!Number.isFinite(across.x)||across.lengthSq()<1e-9) across.set(1,0,0); across.normalize();
+          const n = new THREE.Vector3().crossVectors(across, yAxis);
+          if(!Number.isFinite(n.x)||n.lengthSq()<1e-9) n.set(0,0,1); n.normalize();
+          if(n.z < 0) n.negate();                                  // 掌心法线朝相机为正
+          let xAxis = n.clone().negate();                          // 模型 -X(头)=法线
+          xAxis.sub(yAxis.clone().multiplyScalar(xAxis.dot(yAxis)));
+          if(!Number.isFinite(xAxis.x)||xAxis.lengthSq()<1e-6) xAxis.set(0,0,-1); else xAxis.normalize();
+          const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis);
+          if(!Number.isFinite(zAxis.x)||zAxis.lengthSq()<1e-6) zAxis.set(1,0,0); zAxis.normalize();
           const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
           const off = new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0));
-          q.multiply(off); // 滑杆作局部修正（默认0）
-          horse.quaternion.slerp(q, 0.35);                        // 平滑跟随
+          q.multiply(off);
+          const qOK = Number.isFinite(q.x)&&Number.isFinite(q.y)&&Number.isFinite(q.z)&&Number.isFinite(q.w);
+          if(qOK) horse.quaternion.slerp(q, 0.35);                 // 仅在有限时更新
+          if(Number.isFinite(scale) && scale>1e-6){ horse.scale.setScalar(scale * (+document.getElementById('sScale').value)); }
           horse.visible=true;
-          hud.textContent='✅ 龙马在掌心（跟随手心朝向）';
+          window.__dbg = { scale:+ (scale||0).toFixed(4), palm:+palm.toFixed(3), qOK, pos:[+smoothPos.x.toFixed(2),+smoothPos.y.toFixed(2),+smoothPos.z.toFixed(2)] };
+          hud.textContent='✅ scale='+(scale||0).toFixed(4)+' palm='+palm.toFixed(3)+' qOK='+qOK+' pos='+smoothPos.toArray().map(v=>v.toFixed(2)).join(',');
         } else {
           if(horse) horse.visible=false;
           hud.textContent = g ? ('手势: '+g.categoryName+' — 请张开五指') : '张开五指，让龙马站到掌心';
