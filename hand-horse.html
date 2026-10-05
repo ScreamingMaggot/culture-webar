@@ -140,12 +140,13 @@
           const scale=baseScale * palm * 1.4; // 手掌越大模型越大(收在掌心内)
           horse.position.copy(smoothPos);
           horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
-          // ---- 朝向：3D 跟随手心（+Y=腕→中指；-X(头)=掌心法线），全程容错 ----
-          const dw = (i,j)=>{ const v=new THREE.Vector3(-(hand[i].x-hand[j].x), -(hand[i].y-hand[j].y), -(Number.isFinite(hand[i].z)&&Number.isFinite(hand[j].z)?hand[i].z-hand[j].z:0)); return v; };
-          const yAxis = dw(9,0); if(!Number.isFinite(yAxis.x)||yAxis.lengthSq()<1e-9) yAxis.set(0,1,0); yAxis.normalize();
-          const across = dw(17,5); if(!Number.isFinite(across.x)||across.lengthSq()<1e-9) across.set(1,0,0); across.normalize();
+          // ---- 朝向：用 worldLandmarks(米制3D) 算，转动 1:1 跟随（图像点z不可靠会压小角度）----
+          const wl = (res.worldLandmarks && res.worldLandmarks[0]) || hand;
+          const dw = (i,j)=> new THREE.Vector3(-(wl[i].x-wl[j].x), -(wl[i].y-wl[j].y), -(wl[i].z-wl[j].z));
+          const yAxis = dw(9,0); if(!Number.isFinite(yAxis.x)||yAxis.lengthSq()<1e-12) yAxis.set(0,1,0); yAxis.normalize();
+          const across = dw(17,5); if(!Number.isFinite(across.x)||across.lengthSq()<1e-12) across.set(1,0,0); across.normalize();
           const n = new THREE.Vector3().crossVectors(across, yAxis);
-          if(!Number.isFinite(n.x)||n.lengthSq()<1e-9) n.set(0,0,1); n.normalize();
+          if(!Number.isFinite(n.x)||n.lengthSq()<1e-12) n.set(0,0,1); n.normalize();
           if(n.z < 0) n.negate();                                  // 掌心法线朝相机为正
           let xAxis = n.clone().negate();                          // 模型 -X(头)=法线
           xAxis.sub(yAxis.clone().multiplyScalar(xAxis.dot(yAxis)));
