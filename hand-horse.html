@@ -136,14 +136,18 @@
           const scale=baseScale * palm * 2.2; // 手掌越大模型越大
           horse.position.copy(smoothPos);
           horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
-          // ---- 朝向（推导）：+Y(立)对齐"腕->中指"屏幕方向；头(-X)恒朝镜头(+Z) ----
-          const ux = hand[0].x - hand[9].x;   // 世界X(屏幕右)：镜像已并入
-          const uy = hand[0].y - hand[9].y;   // 世界Y(屏幕上)
-          const ul = Math.hypot(ux, uy) || 1;
-          const Yw = new THREE.Vector3(ux/ul, uy/ul, 0);            // 模型 +Y
-          const Xw = new THREE.Vector3(0, 0, -1);                   // 模型 +X ⇒ 头(-X)朝 +Z 镜头
-          const Zw = new THREE.Vector3().crossVectors(Xw, Yw).normalize();
-          const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(Xw, Yw, Zw));
+          // ---- 朝向：3D 跟随手心（+Y=腕→中指；-X(头)=掌心法线）----
+          const dw = (i,j)=> new THREE.Vector3(-(hand[i].x-hand[j].x), -(hand[i].y-hand[j].y), -(hand[i].z-hand[j].z));
+          const yAxis = dw(9,0).normalize();                       // 模型 +Y = 腕→中指(3D)
+          const across = dw(17,5).normalize();                     // 掌横 食指→小指
+          let n = new THREE.Vector3().crossVectors(across, yAxis);
+          if(n.lengthSq()<1e-9) n.set(0,0,1);
+          n.normalize(); if(n.z < 0) n.negate();                   // 掌心法线朝相机为正
+          let xAxis = n.clone().negate();                          // 模型 -X(头) = 法线 ⇒ 头朝手心方向
+          xAxis.sub(yAxis.clone().multiplyScalar(xAxis.dot(yAxis))); // 正交化
+          if(xAxis.lengthSq()<1e-6) xAxis.set(0,0,-1); else xAxis.normalize();
+          const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+          const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
           const off = new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0));
           q.multiply(off); // 滑杆作局部修正（默认0）
           horse.quaternion.slerp(q, 0.35);                        // 平滑跟随
