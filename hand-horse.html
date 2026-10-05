@@ -80,10 +80,14 @@
     const draco=new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
     loader.load('./assets/longma.min.glb', g=>{
-      horse=g.scene; horse.visible=false; scene.add(horse);
-      // 归一化：把模型缩放到"高度≈1单位"
-      const box=new THREE.Box3().setFromObject(horse); const size=new THREE.Vector3(); box.getSize(size);
-      baseScale=1/Math.max(size.x,size.y,size.z);
+      const model=g.scene;
+      // 把模型"底面中心"对齐到原点（消除它自身的原点偏移，否则会偏到指尖/一侧）
+      const box=new THREE.Box3().setFromObject(model);
+      const size=new THREE.Vector3(); box.getSize(size);
+      const center=new THREE.Vector3(); box.getCenter(center);
+      model.position.set(-center.x, -box.min.y, -center.z);
+      horse=new THREE.Group(); horse.add(model); horse.visible=false; scene.add(horse);
+      baseScale=1/Math.max(size.x,size.y,size.z); // 归一化到"高度≈1单位"
       hud.textContent='✅ 模型就绪：张开五指试试';
     }, undefined, ()=>{ hud.textContent='❌ 模型加载失败'; });
 
@@ -133,7 +137,7 @@
           const wp=screenToWorld(nx, ny);
           if(!haveSmooth){ smoothPos.copy(wp); haveSmooth=true; }
           else smoothPos.lerp(wp, 0.4);
-          const scale=baseScale * palm * 2.2; // 手掌越大模型越大
+          const scale=baseScale * palm * 1.4; // 手掌越大模型越大(收在掌心内)
           horse.position.copy(smoothPos);
           horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
           // ---- 朝向：3D 跟随手心（+Y=腕→中指；-X(头)=掌心法线）----
