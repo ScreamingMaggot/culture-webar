@@ -31,8 +31,8 @@
 
   <div id="panel">
     大小 <input id="sScale" type="range" min="0.2" max="3" step="0.05" value="1">
-    转正 <input id="sYaw" type="range" min="0" max="360" step="15" value="90">
-    俯仰° <input id="sPitch" type="range" min="-60" max="60" step="5" value="-20">
+    转正 <input id="sYaw" type="range" min="0" max="360" step="15" value="0">
+    俯仰° <input id="sPitch" type="range" min="-60" max="60" step="5" value="0">
   </div>
 
   <script type="importmap">
@@ -76,7 +76,7 @@
     function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
     addEventListener('resize', resize); resize();
 
-    let horse=null, baseScale=1, yawDeg=90, pitchDeg=-20;
+    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0;
     const draco=new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
     loader.load('./assets/longma.min.glb', g=>{
@@ -136,16 +136,17 @@
           const scale=baseScale * palm * 2.2; // 手掌越大模型越大
           horse.position.copy(smoothPos);
           horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
-          // ---- 朝向跟随手心 ----
+          // ---- 朝向跟随手心（对正＝头朝镜头+Z、身体竖起+Y）----
           const V=(i)=> new THREE.Vector3(1-hand[i].x, hand[i].y, hand[i].z); // 镜像x与前视一致
           const wrist=V(0), iMCP=V(5), pMCP=V(17), mMCP=V(9);
-          const up = mMCP.clone().sub(wrist).normalize();        // 腕->中指：掌"上"
-          const across = pMCP.clone().sub(iMCP).normalize();     // 食指->小指：掌"横"
-          let fwd = new THREE.Vector3().crossVectors(across, up).normalize(); // 掌心法线
-          if(fwd.z < 0) fwd.negate();                             // 让法线朝相机
-          const xAxis = new THREE.Vector3().crossVectors(up, fwd).normalize();
-          const zAxis = new THREE.Vector3().crossVectors(xAxis, up).normalize();
-          const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, up, zAxis));
+          const handUp = mMCP.clone().sub(wrist).normalize();                 // 掌"上"：腕->中指
+          const across = pMCP.clone().sub(iMCP).normalize();                  // 掌"横"：食指->小指
+          let handNormal = new THREE.Vector3().crossVectors(across, handUp).normalize();
+          if (handNormal.z < 0) handNormal.negate();                          // 掌心法线朝相机
+          const X = handNormal.clone().negate();                              // 模型 +X = -法线 ⇒ 头(-X)朝法线(镜头)
+          const Y = handUp.clone();                                           // 模型 +Y = 掌"上"
+          const Z = new THREE.Vector3().crossVectors(X, Y).normalize();
+          const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
           const off = new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0));
           q.multiply(off); // 滑杆作局部修正
           horse.quaternion.slerp(q, 0.35);                        // 平滑跟随
