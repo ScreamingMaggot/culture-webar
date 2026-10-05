@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>龙马 AR · 张开手掌召唤</title>
+  <script src="./libs/aframe.min.js"></script>
+  <script src="./libs/mindar-image-aframe.prod.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; color: #eee; font-family: system-ui, "Microsoft YaHei", sans-serif; overflow: hidden; }
+    #v { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
+    #summon { position: fixed; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+    #palm { font-size: 16vw; opacity: 0.25; transition: opacity .2s, transform .2s; }
+    #palm.on { opacity: 1; transform: scale(1.1); }
+    #hud { position: fixed; top: 8px; left: 8px; right: 8px; z-index: 9; font: 14px system-ui,"Microsoft YaHei",sans-serif; color: #9fe870; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; }
+    #start { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; text-align: center; padding: 24px; }
+    #start select { padding: 10px; border-radius: 10px; background: #22252b; color: #eee; border: 1px solid #444; }
+    #start button { padding: 14px 26px; border: 0; border-radius: 12px; font-size: 17px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
+    #start .hint { font-size: 13px; color: #ffd479; max-width: 360px; line-height: 1.6; }
+    #tip { position: fixed; bottom: 10px; left: 10px; right: 10px; z-index: 9; display: none; font-size: 13px; color: #9fe870; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; }
+    #panel { position: fixed; bottom: 42px; left: 10px; right: 10px; z-index: 9; display: none; font-size: 12px; color: #eee; background: rgba(0,0,0,.5); padding: 6px 8px; border-radius: 8px; }
+    #panel input[type=range]{ width: 84px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+  <video id="v" autoplay playsinline muted></video>
+  <div id="summon"><div id="palm">🖐</div></div>
+  <div id="hud">正在加载…</div>
+
+  <div id="start">
+    <h3>龙马 AR · 张开手掌召唤</h3>
+    <div class="hint">启动摄像头 → 对着镜头<b>张开五指</b> → 召唤龙马并进入 AR → 对准打印的龙马识别卡，龙马现形；点桌面让它走过去。</div>
+    <select id="cam"></select>
+    <button id="go">启动摄像头</button>
+  </div>
+
+  <div id="tip">扫描中…请把龙马识别卡对准摄像头</div>
+  <div id="panel">
+    缩放 <input id="sScale" type="range" min="0.02" max="0.2" step="0.005" value="0.06">
+    速度 <input id="sSpeed" type="range" min="0.1" max="2" step="0.05" value="0.8">
+    朝向偏移° <input id="sHead" type="range" min="0" max="360" step="15" value="0">
+  </div>
+
+  <template id="tpl">
+    <a-scene mindar-image="imageTargetSrc: ./mindar/card.mind;" embedded color-space="sRGB" renderer="colorManagement: true"
+      vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
+      <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+      <a-entity id="target" mindar-image-target="targetIndex: 0">
+        <a-plane id="hitplane" rotation="-90 0 0" width="3" height="3" position="0 0 0" material="transparent: true; opacity: 0; color: #000"></a-plane>
+        <a-entity id="horse" horse-nav gltf-model="./assets/longma.min.glb" position="0 0 0" scale="0.06 0.06 0.06"></a-entity>
+      </a-entity>
+    </a-scene>
+  </template>
+
+  <script type="module">
+    // ---------- 摄像头（deviceId 改写，兼容夸克）----------
+    const AUTO='__auto__', sel=document.getElementById('cam');
+    const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
+    const score=d=>{const l=(d.label||'').toLowerCase();if(BAD.test(l))return -10;if(/back|environment|rear|后置|主摄|wide/i.test(l))return 30;if(/front|user|face|前置/i)return 5;return 20;};
+    async function list(){let d=[];try{d=(await navigator.mediaDevices.enumerateDevices()).filter(x=>x.kind==='videoinput');}catch(e){}
+      sel.replaceChildren();const o0=document.createElement('option');o0.value=AUTO;o0.textContent='自动';sel.appendChild(o0);
+      d.sort((a,b)=>score(b)-score(a));d.forEach((x,i)=>{const o=document.createElement('option');o.value=x.deviceId;o.textContent=x.label||('摄像头'+i);sel.appendChild(o);});if(d[0])sel.value=d[0].deviceId;}
+    list();
+
+    const hud=document.getElementById('hud'), palm=document.getElementById('palm');
+    let chosenDevice=null;
+    // 全程保持 getUserMedia 改写（MindAR 也会用到）
+    const md=navigator.mediaDevices, orig=md.getUserMedia.bind(md);
+    md.getUserMedia=function(c){c=Object.assign({},c); if(c.video) c.video = (chosenDevice&&chosenDevice!==AUTO)?{deviceId:{exact:chosenDevice}}:true; return orig(c);};
+
+    let arStarted=false, holdFrames=0;
+
+    document.getElementById('go').addEventListener('click', async ()=>{
+      chosenDevice=sel.value;
+      let stream;
+      try{ stream=await md.getUserMedia({video:true}); }catch(e){ hud.textContent='摄像头失败: '+e.name; return; }
+      const video=document.getElementById('v'); video.srcObject=stream; await video.play().catch(()=>{});
+      document.getElementById('start').style.display='none';
+      hud.textContent='张开五指，召唤龙马…';
+      try{
+        const { GestureRecognizer, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
+        const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+        const modelPath='https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
+        let gr; try{ gr=await GestureRecognizer.createFromOptions(vision,{baseOptions:{modelAssetPath:modelPath,delegate:'GPU'},runningMode:'VIDEO',numHands:1}); }
+        catch(e){ gr=await GestureRecognizer.createFromOptions(vision,{baseOptions:{modelAssetPath:modelPath},runningMode:'VIDEO',numHands:1}); }
+        let lastT=-1;
+        const loop=async ()=>{
+          if(arStarted) return;
+          const now=performance.now();
+          if(video.currentTime!==lastT && video.readyState>=2){
+            lastT=video.currentTime;
+            try{
+              const res=gr.recognizeForVideo(video, now);
+              const g=res.gestures&&res.gestures[0]&&res.gestures[0][0];
+              const open=g && /Open_Palm/i.test(g.categoryName) && g.score>0.5;
+              palm.classList.toggle('on', !!open);
+              hud.textContent = g ? ('手势: '+g.categoryName+' ('+Math.round(g.score*100)+'%)'+(open?'  ✅ 召唤！':'')) : '张开五指，召唤龙马…';
+              if(open){ holdFrames++; } else { holdFrames=0; }
+            }catch(e){}
+          }
+          requestAnimationFrame(loop);
+        };
+        loop();
+        // 稳定张开几帧后→进入 AR
+        const watch=setInterval(()=>{
+          if(holdFrames>=3){ clearInterval(watch); enterAR(stream, gr); }
+        }, 120);
+      }catch(e){ hud.textContent='手势模型加载失败: '+e.message; }
+    });
+
+    function enterAR(stream, gr){
+      arStarted=true;
+      try{ if(gr) gr.close(); }catch(e){}
+      try{ stream.getTracks().forEach(t=>t.stop()); }catch(e){}
+      document.getElementById('summon').style.display='none';
+      document.getElementById('v').style.display='none';
+      hud.textContent='进入 AR…对准龙马识别卡';
+      document.getElementById('tip').style.display='block';
+      document.getElementById('panel').style.display='block';
+      wireHorse(); // 先注册组件，再注入场景
+      // 稍等，确保摄像头释放后再交给 MindAR
+      setTimeout(()=>{ document.body.appendChild(document.getElementById('tpl').content.cloneNode(true)); }, 400);
+    }
+
+    // ---------- 龙马点击位移（MindAR 版）----------
+    function wireHorse(){
+      const THREE = window.THREE || AFRAME.THREE;
+      if(!AFRAME.components['horse-nav']){
+        AFRAME.registerComponent('horse-nav',{
+          init:function(){
+            this.tp=new THREE.Vector3(); this.cur=new THREE.Vector3(); this.has=false; this.speed=0.8; this.head=0;
+            this.ray=new THREE.Raycaster();
+            const scene=this.el.sceneEl;
+            this.target=document.querySelector('#target'); this.hit=document.getElementById('hitplane');
+            const tip=document.getElementById('tip');
+            if(this.target){
+              this.target.addEventListener('targetFound',()=>{ tip.textContent='✅ 已识别！点桌面任意处，龙马会走过去'; });
+              this.target.addEventListener('targetLost',()=>{ tip.textContent='识别卡移出画面了，重新对准'; });
+            }
+            document.getElementById('sScale').addEventListener('input',e=>{const s=+e.target.value; this.el.object3D.scale.set(s,s,s);});
+            document.getElementById('sSpeed').addEventListener('input',e=>{this.speed=+e.target.value;});
+            document.getElementById('sHead').addEventListener('input',e=>{this.head=(+e.target.value)*Math.PI/180;});
+            window.addEventListener('pointerdown',(ev)=>{ const cv=scene.canvas; if(cv&&ev.target===cv) this.tap(ev); });
+          },
+          tap:function(ev){
+            if(!this.hit||!this.hit.object3D||!this.target||!this.target.object3D) return;
+            const cv=this.el.sceneEl.canvas; const r=cv.getBoundingClientRect();
+            const ndc=new THREE.Vector2(((ev.clientX-r.left)/r.width)*2-1, -((ev.clientY-r.top)/r.height)*2+1);
+            if(!this.el.sceneEl.camera) return;
+            this.ray.setFromCamera(ndc, this.el.sceneEl.camera);
+            const hits=this.ray.intersectObject(this.hit.object3D, true);
+            if(!hits.length) return;
+            const p=hits[0].point.clone(); this.target.object3D.worldToLocal(p);
+            this.tp.set(p.x,0,p.z); this.has=true;
+          },
+          tick:function(t,dtms){
+            if(!this.has) return;
+            const dt=Math.min(dtms||16,50)/1000; const o=this.el.object3D;
+            const dx=this.tp.x-this.cur.x, dz=this.tp.z-this.cur.z, dist=Math.hypot(dx,dz);
+            if(dist<0.01){ this.has=false; return; }
+            const step=Math.min(this.speed*dt,dist), nx=dx/dist, nz=dz/dist;
+            this.cur.x+=nx*step; this.cur.z+=nz*step; o.position.x=this.cur.x; o.position.z=this.cur.z;
+            o.rotation.y=Math.atan2(nz,-nx)+this.head;
+          }
+        });
+      }
+    }
+  </script>
+</body>
+</html>
