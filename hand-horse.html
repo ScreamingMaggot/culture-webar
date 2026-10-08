@@ -24,7 +24,7 @@
 
   <div id="start">
     <h3>龙马 · 张开手掌站在掌心</h3>
-    <div class="hint">启动摄像头（建议用前置）→ 对着镜头<b>张开五指</b> → 龙马会实时站在你掌心上、跟着手走。</div>
+    <div class="hint">启动摄像头（建议用前置）→ 对着镜头<b>张开五指</b> → 龙马实时站在掌心、跟随手心朝向；<b>点屏幕任意处</b>，龙马会平滑走到你点的地方、头朝行进方向。</div>
     <select id="cam"></select>
     <button id="go">启动摄像头</button>
   </div>
@@ -76,7 +76,7 @@
     function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
     addEventListener('resize', resize); resize();
 
-    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, prevNormal=new THREE.Vector3(0,0,1);
+    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, prevNormal=new THREE.Vector3(0,0,1), moveTarget=null;
     const draco=new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
     loader.load('./assets/longma.min.glb', g=>{
@@ -102,6 +102,13 @@
     }
 
     const smoothPos=new THREE.Vector3(); let haveSmooth=false, visible=false;
+
+    // 点击屏幕 → 龙马平移到该点（画布不镜像，点击坐标直接用）
+    renderer.domElement.addEventListener('click', (ev)=>{
+      const r=renderer.domElement.getBoundingClientRect();
+      const nx=(ev.clientX-r.left)/r.width, ny=(ev.clientY-r.top)/r.height;
+      moveTarget = screenToWorld(nx, ny);
+    });
 
     document.getElementById('go').addEventListener('click', async ()=>{
       chosenDevice=sel.value;
@@ -135,31 +142,42 @@
           // 镜像（前置预览用了 scaleX(-1)）
           const nx=1-cx, ny=cy;
           const wp=screenToWorld(nx, ny);
-          if(!haveSmooth){ smoothPos.copy(wp); haveSmooth=true; }
-          else smoothPos.lerp(wp, 0.7);
-          const scale=baseScale * palm * 1.4; // 手掌越大模型越大(收在掌心内)
-          horse.position.copy(smoothPos);
+          const desired = moveTarget ? moveTarget : wp;   // 有点击点→去那；否则跟掌心
+          if(!haveSmooth){ smoothPos.copy(desired); haveSmooth=true; }
+          else smoothPos.lerp(desired, 0.35);
+          const scale=baseScale * palm * 1.4;
           horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
-          // ---- 朝向：用 worldLandmarks(米制3D) 算，转动 1:1 跟随（图像点z不可靠会压小角度）----
-          const wl = (res.worldLandmarks && res.worldLandmarks[0]) || hand;
-          const dw = (i,j)=> new THREE.Vector3(-(wl[i].x-wl[j].x), -(wl[i].y-wl[j].y), -(wl[i].z-wl[j].z));
-          const yAxis = dw(9,0); if(!Number.isFinite(yAxis.x)||yAxis.lengthSq()<1e-12) yAxis.set(0,1,0); yAxis.normalize();
-          const across = dw(17,5); if(!Number.isFinite(across.x)||across.lengthSq()<1e-12) across.set(1,0,0); across.normalize();
-          const n = new THREE.Vector3().crossVectors(across, yAxis);
-          if(!Number.isFinite(n.x)||n.lengthSq()<1e-12) n.set(0,0,1); n.normalize();
-          if(prevNormal && n.dot(prevNormal) < 0) n.negate();      // 与前帧连续(消除正反歧义,两侧都能跟)
-          prevNormal = n.clone();
-          let xAxis = n.clone().negate();                          // 模型 -X(头)=法线
-          xAxis.sub(yAxis.clone().multiplyScalar(xAxis.dot(yAxis)));
-          if(!Number.isFinite(xAxis.x)||xAxis.lengthSq()<1e-6) xAxis.set(0,0,-1); else xAxis.normalize();
-          const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis);
-          if(!Number.isFinite(zAxis.x)||zAxis.lengthSq()<1e-6) zAxis.set(1,0,0); zAxis.normalize();
-          const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
+          horse.position.copy(smoothPos);
+          const travel = new THREE.Vector3().subVectors(desired, smoothPos);
+          const moving = travel.length() > 0.015;
+          let q;
+          if(moving){
+            // 移动中：头(-X)朝行进方向、身体竖直
+            travel.y = 0; if(travel.lengthSq()<1e-9) travel.set(0,0,1); travel.normalize();
+            const Xw = travel.clone().negate(), Yw = new THREE.Vector3(0,1,0);
+            const Zw = new THREE.Vector3().crossVectors(Xw, Yw).normalize();
+            q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(Xw, Yw, Zw));
+          } else {
+            // 静止：朝向跟随手心（worldLandmarks 米制3D；图像点z不可靠会压小角度）
+            const wl = (res.worldLandmarks && res.worldLandmarks[0]) || hand;
+            const dw = (i,j)=> new THREE.Vector3(-(wl[i].x-wl[j].x), -(wl[i].y-wl[j].y), -(wl[i].z-wl[j].z));
+            const yAxis = dw(9,0); if(!Number.isFinite(yAxis.x)||yAxis.lengthSq()<1e-12) yAxis.set(0,1,0); yAxis.normalize();
+            const across = dw(17,5); if(!Number.isFinite(across.x)||across.lengthSq()<1e-12) across.set(1,0,0); across.normalize();
+            const n = new THREE.Vector3().crossVectors(across, yAxis);
+            if(!Number.isFinite(n.x)||n.lengthSq()<1e-12) n.set(0,0,1); n.normalize();
+            if(prevNormal && n.dot(prevNormal) < 0) n.negate();   // 与前帧连续(内外两侧都能跟)
+            prevNormal = n.clone();
+            let xAxis = n.clone().negate();
+            xAxis.sub(yAxis.clone().multiplyScalar(xAxis.dot(yAxis)));
+            if(!Number.isFinite(xAxis.x)||xAxis.lengthSq()<1e-6) xAxis.set(0,0,-1); else xAxis.normalize();
+            const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis);
+            if(!Number.isFinite(zAxis.x)||zAxis.lengthSq()<1e-6) zAxis.set(1,0,0); zAxis.normalize();
+            q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
+          }
           const off = new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0));
           q.multiply(off);
           const qOK = Number.isFinite(q.x)&&Number.isFinite(q.y)&&Number.isFinite(q.z)&&Number.isFinite(q.w);
-          if(qOK) horse.quaternion.slerp(q, 0.6);                 // 仅在有限时更新(灵敏度提高)
-          if(Number.isFinite(scale) && scale>1e-6){ horse.scale.setScalar(scale * (+document.getElementById('sScale').value)); }
+          if(qOK) horse.quaternion.slerp(q, 0.6);
           horse.visible=true;
           window.__dbg = { scale:+ (scale||0).toFixed(4), palm:+palm.toFixed(3), qOK, pos:[+smoothPos.x.toFixed(2),+smoothPos.y.toFixed(2),+smoothPos.z.toFixed(2)] };
           hud.textContent='✅ scale='+(scale||0).toFixed(4)+' palm='+palm.toFixed(3)+' qOK='+qOK+' pos='+smoothPos.toArray().map(v=>v.toFixed(2)).join(',');
