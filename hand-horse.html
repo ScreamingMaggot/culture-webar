@@ -103,11 +103,13 @@
 
     const smoothPos=new THREE.Vector3(); let haveSmooth=false, visible=false;
 
-    // 点击屏幕 → 龙马平移到该点（画布不镜像，点击坐标直接用）
-    renderer.domElement.addEventListener('click', (ev)=>{
+    // 点击屏幕 → 龙马平移到该点（window 上监听 pointerdown，触摸更可靠）
+    window.addEventListener('pointerdown', (ev)=>{
+      if(ev.target && ev.target.closest && ev.target.closest('#panel,#hud,#start')) return;
       const r=renderer.domElement.getBoundingClientRect();
       const nx=(ev.clientX-r.left)/r.width, ny=(ev.clientY-r.top)/r.height;
       moveTarget = screenToWorld(nx, ny);
+      hud.textContent='已设目标点 ('+nx.toFixed(2)+','+ny.toFixed(2)+')，龙马走过去…';
     });
 
     document.getElementById('go').addEventListener('click', async ()=>{
