@@ -80,7 +80,7 @@
     let holder = null, modelH = 1;
     const draco = new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
-    loader.load('./assets/longma.min.glb', g => {
+    loader.load('./assets/a19.min.glb', g => {
       const model = g.scene;
       const box = new THREE.Box3().setFromObject(model); const size = new THREE.Vector3(); box.getSize(size);
       const c = new THREE.Vector3(); box.getCenter(c);

@@ -91,9 +91,8 @@
     function sendCommand(cmd){ /* TODO: 蓝牙协议到位后在此向 BT24 特征 writeValue */ console.log('[stub] 发送指令:', cmd); }
     const draco=new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
-    loader.load('./assets/longma.min.glb', g=>{
     window.__loadState='pending';
-    loader.load('./assets/longma.min.glb', g => {
+    loader.load('./assets/a19.min.glb', g => {
       const model=g.scene;
       const box=new THREE.Box3().setFromObject(model);
       const size=new THREE.Vector3(); box.getSize(size);

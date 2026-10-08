@@ -77,7 +77,7 @@
 				const applyCfg = () => { speed = +speedEl.value; headOffset = (+headEl.value) * Math.PI / 180; if (horse) horse.scale.setScalar(+scaleEl.value); };
 				scaleEl.addEventListener('input', applyCfg); speedEl.addEventListener('input', applyCfg); headEl.addEventListener('input', applyCfg);
 
-				loader.load( '../../assets/longma.min.glb', function ( gltf ) {
+				loader.load( '../../assets/a19.min.glb', function ( gltf ) {
 					horse = gltf.scene;
 					horse.scale.setScalar( +scaleEl.value );
 					horse.visible = false;
