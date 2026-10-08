@@ -145,7 +145,11 @@
         lastT=video.currentTime;
         let res=null; try{ res=gr.recognizeForVideo(video, now); }catch(e){}
         renderer.render(scene,camera);
-        if(!res || !horse) return;
+        if(!res || !horse){
+          const gc = res && res.gestures && res.gestures[0] && res.gestures[0][0];
+          hud.textContent = '诊断 res='+(!!res)+' horse='+(!!horse)+' 手势='+(gc?gc.categoryName:'无')+' 手='+((res&&res.landmarks&&res.landmarks[0])?1:0);
+          return;
+        }
         const hand=res.landmarks && res.landmarks[0];
         const g=res.gestures && res.gestures[0] && res.gestures[0][0];
         const cat = g ? g.categoryName : '';
