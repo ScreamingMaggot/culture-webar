@@ -78,7 +78,7 @@
     function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
     addEventListener('resize', resize); resize();
 
-    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, prevNormal=new THREE.Vector3(0,0,1), moveTarget=null;
+    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, prevNormal=new THREE.Vector3(0,0,1), moveTarget=null, created=false;
 
     // ---- 手势 → 龙马功能（向上指/胜利/握拳 → 跳舞/唱歌/科普）；蓝牙待接入，先屏上显示 ----
     const FN = {
@@ -148,64 +148,62 @@
         if(!res || !horse) return;
         const hand=res.landmarks && res.landmarks[0];
         const g=res.gestures && res.gestures[0] && res.gestures[0][0];
-        const open=g && /Open_Palm/i.test(g.categoryName) && g.score>0.4;
-        // 手势 → 功能触发（去抖：连续2帧同一手势才触发一次）
         const cat = g ? g.categoryName : '';
+        const open = cat==='Open_Palm' && g && g.score>0.4;
         const fn = FN[cat];
+
+        // 功能手势：去抖(连续2帧) → 发指令 + 屏显“已发送：功能·指令”
         if(fn){
           fnHold++;
-          if(fnHold>=2){ fnEl.style.display='block'; fnEl.textContent='🖐 '+fn.name+'  ← 将发送：'+fn.cmd;
-            if(fnName!==fn.name){ fnName=fn.name; sendCommand(fn.cmd); } }
+          if(fnHold>=2){
+            fnEl.style.display='block';
+            fnEl.textContent='已发送：'+fn.name+'   ·   指令 '+fn.cmd;
+            if(fnName!==fn.name){ fnName=fn.name; sendCommand(fn.cmd); }
+          }
         } else { fnHold=0; fnName=''; fnEl.style.display='none'; }
-        if(hand && open){
-          // 掌心 ≈ 腕(0) 与 中指根(9) 的中点（比"指根均值"靠下，避免偏高）
-          let cx=(hand[0].x+hand[9].x)/2, cy=(hand[0].y+hand[9].y)/2;
+
+        if(open && hand){
+          // ① 伸出手掌：产生模型 + 跟随手心
+          created=true; moveTarget=null;
+          const cx=(hand[0].x+hand[9].x)/2, cy=(hand[0].y+hand[9].y)/2;
           const palm=Math.hypot(hand[9].x-hand[0].x, hand[9].y-hand[0].y);
-          // 镜像（前置预览用了 scaleX(-1)）
           const nx=1-cx, ny=cy;
           const wp=screenToWorld(nx, ny);
-          const desired = moveTarget ? moveTarget : wp;   // 有点击点→去那；否则跟掌心
-          if(!haveSmooth){ smoothPos.copy(desired); haveSmooth=true; }
-          else smoothPos.lerp(desired, 0.35);
+          if(!haveSmooth){ smoothPos.copy(wp); haveSmooth=true; } else smoothPos.lerp(wp, 0.5);
           const scale=baseScale * palm * 1.4;
-          horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
+          if(Number.isFinite(scale) && scale>1e-6) horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
           horse.position.copy(smoothPos);
-          const travel = new THREE.Vector3().subVectors(desired, smoothPos);
-          const moving = travel.length() > 0.015;
-          let q;
-          if(moving){
-            // 移动中：头(-X)朝行进方向、身体竖直
-            travel.y = 0; if(travel.lengthSq()<1e-9) travel.set(0,0,1); travel.normalize();
-            const Xw = travel.clone().negate(), Yw = new THREE.Vector3(0,1,0);
-            const Zw = new THREE.Vector3().crossVectors(Xw, Yw).normalize();
-            q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(Xw, Yw, Zw));
-          } else {
-            // 静止：朝向跟随手心（worldLandmarks 米制3D；图像点z不可靠会压小角度）
-            const wl = (res.worldLandmarks && res.worldLandmarks[0]) || hand;
-            const dw = (i,j)=> new THREE.Vector3(-(wl[i].x-wl[j].x), -(wl[i].y-wl[j].y), -(wl[i].z-wl[j].z));
-            const yAxis = dw(9,0); if(!Number.isFinite(yAxis.x)||yAxis.lengthSq()<1e-12) yAxis.set(0,1,0); yAxis.normalize();
-            const across = dw(17,5); if(!Number.isFinite(across.x)||across.lengthSq()<1e-12) across.set(1,0,0); across.normalize();
-            const n = new THREE.Vector3().crossVectors(across, yAxis);
-            if(!Number.isFinite(n.x)||n.lengthSq()<1e-12) n.set(0,0,1); n.normalize();
-            if(prevNormal && n.dot(prevNormal) < 0) n.negate();   // 与前帧连续(内外两侧都能跟)
-            prevNormal = n.clone();
-            let xAxis = n.clone().negate();
-            xAxis.sub(yAxis.clone().multiplyScalar(xAxis.dot(yAxis)));
-            if(!Number.isFinite(xAxis.x)||xAxis.lengthSq()<1e-6) xAxis.set(0,0,-1); else xAxis.normalize();
-            const zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis);
-            if(!Number.isFinite(zAxis.x)||zAxis.lengthSq()<1e-6) zAxis.set(1,0,0); zAxis.normalize();
-            q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
-          }
-          const off = new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0));
-          q.multiply(off);
-          const qOK = Number.isFinite(q.x)&&Number.isFinite(q.y)&&Number.isFinite(q.z)&&Number.isFinite(q.w);
-          if(qOK) horse.quaternion.slerp(q, 0.6);
+          const wl=(res.worldLandmarks && res.worldLandmarks[0]) || hand;
+          const dw=(i,j)=> new THREE.Vector3(-(wl[i].x-wl[j].x), -(wl[i].y-wl[j].y), -(wl[i].z-wl[j].z));
+          const yAxis=dw(9,0); if(!Number.isFinite(yAxis.x)||yAxis.lengthSq()<1e-12) yAxis.set(0,1,0); yAxis.normalize();
+          const across=dw(17,5); if(!Number.isFinite(across.x)||across.lengthSq()<1e-12) across.set(1,0,0); across.normalize();
+          const n=new THREE.Vector3().crossVectors(across,yAxis); if(!Number.isFinite(n.x)||n.lengthSq()<1e-12) n.set(0,0,1); n.normalize();
+          if(prevNormal && n.dot(prevNormal)<0) n.negate(); prevNormal=n.clone();
+          let xAxis=n.clone().negate(); xAxis.sub(yAxis.clone().multiplyScalar(xAxis.dot(yAxis)));
+          if(!Number.isFinite(xAxis.x)||xAxis.lengthSq()<1e-6) xAxis.set(0,0,-1); else xAxis.normalize();
+          const zAxis=new THREE.Vector3().crossVectors(xAxis,yAxis); if(!Number.isFinite(zAxis.x)||zAxis.lengthSq()<1e-6) zAxis.set(1,0,0); zAxis.normalize();
+          let q=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis,yAxis,zAxis));
+          const off=new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(pitchDeg), THREE.MathUtils.degToRad(yawDeg), 0)); q.multiply(off);
+          if(Number.isFinite(q.x)&&Number.isFinite(q.y)&&Number.isFinite(q.z)&&Number.isFinite(q.w)) horse.quaternion.slerp(q, 0.6);
           horse.visible=true;
-          window.__dbg = { scale:+ (scale||0).toFixed(4), palm:+palm.toFixed(3), qOK, pos:[+smoothPos.x.toFixed(2),+smoothPos.y.toFixed(2),+smoothPos.z.toFixed(2)] };
-          hud.textContent='✅ scale='+(scale||0).toFixed(4)+' palm='+palm.toFixed(3)+' qOK='+qOK+' pos='+smoothPos.toArray().map(v=>v.toFixed(2)).join(',');
+          hud.textContent='① 手掌跟随 · 手势 '+cat+' ('+Math.round((g.score||0)*100)+'%)';
+        } else if(created){
+          // ② 其它手势 / 无手：不跟随；点屏幕(鼠标)位移
+          if(moveTarget) smoothPos.lerp(moveTarget, 0.35);
+          horse.position.copy(smoothPos);
+          horse.visible=true;
+          if(moveTarget){
+            const tv=new THREE.Vector3().subVectors(moveTarget, smoothPos);
+            if(tv.length()>0.02){ tv.y=0; tv.normalize();
+              const Xw=tv.clone().negate(), Yw=new THREE.Vector3(0,1,0), Zw=new THREE.Vector3().crossVectors(Xw,Yw).normalize();
+              horse.quaternion.slerp(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(Xw,Yw,Zw)), 0.3);
+            }
+          }
+          hud.textContent = fn ? ('③ 已触发 «'+fn.name+'»（不跟随·已发指令 '+fn.cmd+'）')
+                              : (cat ? ('手势 '+cat+'（不跟随）· 可点屏幕移动') : '② 没有手 · 点屏幕让龙马移动');
         } else {
           if(horse) horse.visible=false;
-          hud.textContent = g ? ('手势: '+g.categoryName+' — 请张开五指') : '张开五指，让龙马站到掌心';
+          hud.textContent = cat ? ('手势 '+cat+' — 张开手掌召出龙马') : '张开手掌，让龙马出现';
         }
       })();
     });
