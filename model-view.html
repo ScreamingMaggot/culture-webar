@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GLB 查看器</title>
+  <style>
+    html,body{margin:0;height:100%;background:#1b1f24;overflow:hidden;font-family:system-ui,"Microsoft YaHei"}
+    #info{position:fixed;top:8px;left:8px;z-index:9;color:#9fe870;background:rgba(0,0,0,.6);padding:8px 10px;border-radius:8px;font:13px ui-monospace,monospace;white-space:pre-wrap}
+  </style>
+  <script type="importmap">
+  { "imports": {
+    "three": "./samples/three-webxr-hittest/libs/three.module.js",
+    "three/addons/": "./samples/three-webxr-hittest/libs/jsm/"
+  } }
+  </script>
+</head>
+<body>
+  <div id="info">loading…</div>
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+    const src = new URLSearchParams(location.search).get('src') || './assets/longma.min.glb';
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight); document.body.appendChild(renderer.domElement);
+    const scene = new THREE.Scene(); scene.background = new THREE.Color(0x1b1f24);
+    const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.01, 100000);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 2.5));
+    const dl = new THREE.DirectionalLight(0xffffff, 2); dl.position.set(1,2,1.5); scene.add(dl);
+    const dl2 = new THREE.DirectionalLight(0xffffff, 1); dl2.position.set(-1,-1,-1.5); scene.add(dl2);
+    const draco = new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
+    const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
+    let obj = null;
+    loader.load(src, g => {
+      obj = g.scene; scene.add(obj);
+      const box = new THREE.Box3().setFromObject(obj); const size = new THREE.Vector3(); box.getSize(size); const c = new THREE.Vector3(); box.getCenter(c);
+      obj.position.sub(c);
+      const d = Math.max(size.x, size.y, size.z);
+      camera.position.set(d*1.1, d*0.9, d*1.1); camera.lookAt(0,0,0); camera.near = d/1000; camera.far = d*20; camera.updateProjectionMatrix();
+      const grid = new THREE.GridHelper(d*2.2, 22); grid.position.y = -size.y/2; scene.add(grid);
+      const ax = new THREE.AxesHelper(d*0.6); scene.add(ax);
+      document.getElementById('info').textContent = 'src='+src+'\nsize X/Y/Z = '+size.toArray().map(v=>v.toFixed(1)).join(' / ')+'\n(地面网格在底部；红=X 绿=Y 蓝=Z)';
+    }, undefined, e => { document.getElementById('info').textContent = 'load err: '+(e&&e.message||e); });
+    let t=0; renderer.setAnimationLoop(()=>{ if(obj){ t+=0.006; obj.rotation.y = t; } renderer.render(scene,camera); });
+  </script>
+</body>
+</html>

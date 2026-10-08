@@ -92,16 +92,19 @@
     const draco=new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
     loader.load('./assets/longma.min.glb', g=>{
+    window.__loadState='pending';
+    loader.load('./assets/longma.min.glb', g => {
       const model=g.scene;
-      // 把模型"底面中心"对齐到原点（消除它自身的原点偏移，否则会偏到指尖/一侧）
       const box=new THREE.Box3().setFromObject(model);
       const size=new THREE.Vector3(); box.getSize(size);
       const center=new THREE.Vector3(); box.getCenter(center);
       model.position.set(-center.x, -box.min.y, -center.z);
       horse=new THREE.Group(); horse.add(model); horse.visible=false; scene.add(horse);
-      baseScale=1/Math.max(size.x,size.y,size.z); // 归一化到"高度≈1单位"
+      baseScale=1/Math.max(size.x,size.y,size.z);
+      window.__loadState='ok';
       hud.textContent='✅ 模型就绪：张开五指试试';
-    }, undefined, ()=>{ hud.textContent='❌ 模型加载失败'; });
+    }, (p)=>{ if(p&&p.total) window.__loadState='loading '+Math.round(p.loaded/p.total*100)+'%'; },
+       (e)=>{ window.__loadState='err:'+((e&&e.message)||e); hud.textContent='❌ 模型加载失败: '+((e&&e.message)||e); });
 
     document.getElementById('sScale').addEventListener('input',e=>{});
     document.getElementById('sYaw').addEventListener('input',e=>{ yawDeg=+e.target.value; });
@@ -147,7 +150,7 @@
         renderer.render(scene,camera);
         if(!res || !horse){
           const gc = res && res.gestures && res.gestures[0] && res.gestures[0][0];
-          hud.textContent = '诊断 res='+(!!res)+' horse='+(!!horse)+' 手势='+(gc?gc.categoryName:'无')+' 手='+((res&&res.landmarks&&res.landmarks[0])?1:0);
+          hud.textContent = '诊断 res='+(!!res)+' horse='+(!!horse)+' 手势='+(gc?gc.categoryName:'无')+' 手='+((res&&res.landmarks&&res.landmarks[0])?1:0)+' load='+(window.__loadState||'?');
           return;
         }
         const hand=res.landmarks && res.landmarks[0];
