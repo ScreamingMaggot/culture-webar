@@ -35,7 +35,7 @@
     大小 <input id="sScale" type="range" min="0.2" max="3" step="0.05" value="1">
     转正 <input id="sYaw" type="range" min="0" max="360" step="15" value="0">
     俯仰° <input id="sPitch" type="range" min="-60" max="60" step="5" value="0">
-    掌轴° <input id="sRoll" type="range" min="0" max="360" step="15" value="90">
+    掌轴° <input id="sRoll" type="range" min="0" max="360" step="15" value="270">
   </div>
 
   <script type="importmap">
@@ -79,7 +79,7 @@
     function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
     addEventListener('resize', resize); resize();
 
-    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, rollDeg=90, prevNormal=new THREE.Vector3(0,0,1), moveTarget=null, created=false;
+    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, rollDeg=270, prevNormal=new THREE.Vector3(0,0,1), moveTarget=null, created=false;
 
     // ---- 手势 → 龙马功能（向上指/胜利/握拳 → 跳舞/唱歌/科普）；蓝牙待接入，先屏上显示 ----
     const FN = {
