@@ -9,6 +9,7 @@
     #v { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; transform: scaleX(-1); }
     #gl { position: fixed; inset: 0; z-index: 1; width: 100%; height: 100%; }
     #hud { position: fixed; top: 8px; left: 8px; right: 8px; z-index: 9; font: 14px system-ui,"Microsoft YaHei",sans-serif; color: #9fe870; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 8px; }
+    #fn { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 10; display: none; font: 18px/1.4 system-ui,"Microsoft YaHei",sans-serif; font-weight: 700; color: #fff; background: rgba(47,111,237,.9); padding: 10px 18px; border-radius: 12px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,.4); }
     #start { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; text-align: center; padding: 24px; }
     #start select { padding: 10px; border-radius: 10px; background: #22252b; color: #eee; border: 1px solid #444; }
     #start button { padding: 14px 26px; border: 0; border-radius: 12px; font-size: 17px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
@@ -21,6 +22,7 @@
   <video id="v" autoplay playsinline muted></video>
   <canvas id="gl"></canvas>
   <div id="hud">正在加载…</div>
+  <div id="fn"></div>
 
   <div id="start">
     <h3>龙马 · 张开手掌站在掌心</h3>
@@ -77,6 +79,16 @@
     addEventListener('resize', resize); resize();
 
     let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, prevNormal=new THREE.Vector3(0,0,1), moveTarget=null;
+
+    // ---- 手势 → 龙马功能（向上指/胜利/握拳 → 跳舞/唱歌/科普）；蓝牙待接入，先屏上显示 ----
+    const FN = {
+      'Pointing_Up': { name: '跳舞', cmd: 'DANCE' },
+      'Victory':     { name: '唱歌', cmd: 'SING' },
+      'Closed_Fist': { name: '科普', cmd: 'SCIENCE' }
+    };
+    const fnEl = document.getElementById('fn');
+    let fnHold = 0, fnName = '';
+    function sendCommand(cmd){ /* TODO: 蓝牙协议到位后在此向 BT24 特征 writeValue */ console.log('[stub] 发送指令:', cmd); }
     const draco=new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
     loader.load('./assets/longma.min.glb', g=>{
@@ -137,6 +149,14 @@
         const hand=res.landmarks && res.landmarks[0];
         const g=res.gestures && res.gestures[0] && res.gestures[0][0];
         const open=g && /Open_Palm/i.test(g.categoryName) && g.score>0.4;
+        // 手势 → 功能触发（去抖：连续2帧同一手势才触发一次）
+        const cat = g ? g.categoryName : '';
+        const fn = FN[cat];
+        if(fn){
+          fnHold++;
+          if(fnHold>=2){ fnEl.style.display='block'; fnEl.textContent='🖐 '+fn.name+'  ← 将发送：'+fn.cmd;
+            if(fnName!==fn.name){ fnName=fn.name; sendCommand(fn.cmd); } }
+        } else { fnHold=0; fnName=''; fnEl.style.display='none'; }
         if(hand && open){
           // 掌心 ≈ 腕(0) 与 中指根(9) 的中点（比"指根均值"靠下，避免偏高）
           let cx=(hand[0].x+hand[9].x)/2, cy=(hand[0].y+hand[9].y)/2;
