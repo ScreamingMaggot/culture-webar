@@ -3,50 +3,152 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>BLE 连接并 dump UUID（BT24 现场确认）</title>
+  <title>DX-BT24 现场调试：枚举 UUID + 发指令字节</title>
   <style>
     body { margin: 0; font-family: system-ui, "Microsoft YaHei", sans-serif; background: #111; color: #eee; padding: 16px; }
     h3 { margin-top: 0; }
-    button { padding: 14px 22px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
-    #log { margin-top: 14px; white-space: pre-wrap; font: 12px ui-monospace, Consolas, monospace; color: #9fe870; background: #000; padding: 12px; border-radius: 8px; line-height: 1.5; }
-    .hint { font-size: 13px; color: #ffd479; line-height: 1.6; margin-top: 12px; }
+    button { padding: 10px 14px; border: 0; border-radius: 10px; font-size: 14px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; margin: 3px; }
+    button.act { background: #149f5a; }
+    #log { margin-top: 14px; white-space: pre-wrap; font: 12px ui-monospace, Consolas, monospace; color: #9fe870; background: #000; padding: 12px; border-radius: 8px; line-height: 1.5; min-height: 160px; }
+    .hint { font-size: 13px; color: #ffd479; line-height: 1.7; }
+    .row { margin: 10px 0; }
+    #hex { padding: 9px; border-radius: 8px; border: 1px solid #444; background: #000; color: #9fe870; font: 14px ui-monospace, Consolas, monospace; width: 130px; }
+    .cmd { background: #2a2f3a; font-weight: 600; }
+    #st { font-size: 13px; color: #9fe870; }
   </style>
 </head>
 <body>
-  <h3>BLE 连接并 dump 全部 Service / Characteristic UUID</h3>
-  <div>板子上电后点下面按钮 → 在弹窗里选那个蓝牙模块 → 本页会打印它的名字、服务、特征与属性。</div>
-  <div style="margin:14px 0"><button id="b">连接并枚举</button></div>
-  <div id="log">navigator.bluetooth 存在? <span id="sup"></span></div>
-  <p class="hint">用途：确认 BT24 的真实广播名 + 可写特征 UUID（协议里要填的）。把打印结果发我即可。</p>
+  <h3>DX-BT24 现场调试</h3>
+  <div class="hint">
+    DX-BT24（大夏龙雀 BLE5.1 透传模块，Dialog14531）：GATT ＝ Service <b>0xFFE0</b> / 特征 <b>0xFFE1</b>（可写 + Notify），数据从其 TX/RX 脚进出，接 STM32 USART2（默认 9600/8/N/1）。<br>
+    模块<b>未被连接时处于 AT 命令模式</b>；被网页连上后自动进<b>透传模式</b>：网页写入的字节<b>原样</b>到达单片机串口，不需要额外帧头。<br>
+    本页用来现场确认两件事：① 真实广播名 + 全部 Service/Characteristic UUID（看是否被 AT 改过）；② 按固件指令表发字节，看实物是否真动作。
+  </div>
+  <div class="row">
+    <button id="bEnum">连接并枚举全部 UUID</button>
+    <button id="bFast" class="act">只连 FFE0/FFE1</button>
+    <span id="st"></span>
+  </div>
+  <div class="row">
+    手写字节 <input id="hex" value="09" maxlength="8"> <button id="bw" class="act">发送</button>
+    <button id="bn">订阅回传 Notify</button>
+    <button id="bsweep" class="cmd">发 00-FF 全字节(跳过0x71，间隔20ms)</button>
+  </div>
+  <div class="hint">全字节扫描：透传模块会不会吃掉 0x0A/0x0D 这类控制字节，只有跑一遍 00-FF 才知道。
+    发完看 STM32 那边上位机的最后一条 BLE&gt;PC 是否为 #255、序列有无缺项。</div>
+  <div class="row">
+    <span class="hint">固件指令表（单字节、离散一次性；上一动作未完不接新指令，所以点一下后要等它做完）：</span><br>
+    <button class="cmd" data-b="02">0x02 立正</button><button class="cmd" data-b="03">0x03 前进</button><button class="cmd" data-b="04">0x04 后退</button><button class="cmd" data-b="05">0x05 握手</button><button class="cmd" data-b="06">0x06 左</button><button class="cmd" data-b="07">0x07 右</button><button class="cmd" data-b="08">0x08 转圈</button><button class="cmd" data-b="09">0x09 跳舞</button><button class="cmd" data-b="0A">0x0A 趴</button><button class="cmd" data-b="0B">0x0B 蹲</button><button class="cmd" data-b="0C">0x0C 摇尾</button><button class="cmd" data-b="0D">0x0D 互动</button><button class="cmd" data-b="0E">0x0E 灯</button><button class="cmd" data-b="0F">0x0F 灯</button><button class="cmd" data-b="10">0x10 灯</button><button class="cmd" data-b="11">0x11 灯</button>
+  </div>
+  <div class="hint">⚠ <b>不要发 0x71</b>：它切换语音模式并<b>关闭蓝牙</b>，连接会当场断掉。<br>
+    连不上时先查：手机系统蓝牙已开、模块已上电（3.3–5V）、没被别的 App/手机占用（BLE 从机通常只允许一条连接）。</div>
+  <div id="log">等待操作…</div>
+
   <script>
-    document.getElementById('sup').textContent = ('bluetooth' in navigator) ? 'true' : 'false ❌ 本浏览器不支持';
-    const log = (s) => { const el = document.getElementById('log'); el.textContent += '\n' + s; el.scrollTop = el.scrollHeight; };
-    document.getElementById('b').addEventListener('click', async () => {
-      if (!navigator.bluetooth) { log('不支持 Web Bluetooth'); return; }
-      log('——— 打开设备选择器 ———');
-      try {
-        // 覆盖常见国产透传模块的服务 UUID，便于枚举到特征
-        const dev = await navigator.bluetooth.requestDevice({
-          acceptAllDevices: true,
-          optionalServices: ['ffe0','ffe1','ffe2','fff0','fff1','fff2','fff6','fff7','fff8','ff00','ff02','0000ff00-0000-1000-8000-00805f9b34fb','battery_service','device_information']
-        });
-        log('设备名: ' + (dev.name || '(无名)'));
-        log('deviceId: ' + dev.id);
-        const server = await dev.gatt.connect();
-        log('已连接，枚举服务…');
-        const services = await server.getPrimaryServices();
-        for (const s of services) {
-          log('\n[Service] ' + s.uuid);
-          try {
-            const chars = await s.getCharacteristics();
-            for (const c of chars) log('   [Char] ' + c.uuid + '  属性: ' + c.properties.map(p=>p).join(','));
-          } catch (e) { log('   (读特征失败: ' + e.name + ')'); }
+    document.getElementById('st').textContent = 'navigator.bluetooth 存在? ' + (('bluetooth' in navigator) ? 'true' : 'false ❌ 本浏览器不支持（用夸克/Chrome；APK 套壳的 WebView 不行）');
+    const el = document.getElementById('log'), st = document.getElementById('st');
+    const log = s => { el.textContent += '\n' + s; el.scrollTop = el.scrollHeight; };
+    const SVC = 'ffe0', CHAR = 'ffe1';
+    const OPT = ['ffe0', 'ffe1', 'ffe2', 'ffe3', 'ffe4', 'ffe5', 'ffe6', 'ffe7', 'fff0', 'fff1', 'fff2', 'fff3', 'fff6', 'fff7', 'fff8', 'ff00', 'ff02', 'ae01', 'ae02', 'battery_service', 'device_information'];
+    let dev = null, ch = null;
+    // BluetoothCharacteristicProperties 是布尔属性对象，不是可迭代容器
+    const props = c => ['broadcast', 'read', 'writeWithoutResponse', 'write', 'notify', 'indicate', 'reliableWrite', 'writableAuxiliaries']
+      .filter(k => c.properties[k]).join(',') || '(无可写/可订阅属性)';
+    const isW = c => c.properties.writeWithoutResponse || c.properties.write;
+
+    async function pick(useFilter) {
+      if (useFilter) {
+        try {
+          return await navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'DX' }, { namePrefix: 'BT' }, { services: [SVC] }], optionalServices: OPT });
+        } catch (e) {
+          if (e.name === 'NotFoundError') { log('按 DX/BT/FFE0 过滤没扫到 → 改为列出所有设备（若弹窗为空说明模块没上电或手机蓝牙没开）'); }
+          else throw e;
         }
-        log('\n✅ 完成。把以上贴给我：可写(write/writeWithoutResponse)的那个特征就是发指令用的。');
-      } catch (e) {
-        log('结束/错误: ' + e.name + ' — ' + e.message);
       }
+      return navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: OPT });
+    }
+    function watchDisconnect() {
+      dev.addEventListener('gattserverdisconnected', () => { ch = null; st.textContent = '已断开 → 重新点连接'; log('——— 连接断开（若刚发过 0x71，就是它关的蓝牙）———'); });
+    }
+    async function ensureConn(useFilter) {
+      if (!navigator.bluetooth) throw new Error('本浏览器不支持 Web Bluetooth');
+      if (!dev || !dev.gatt.connected) {
+        dev = await pick(useFilter !== false);
+        log('设备名: ' + (dev.name || '(无名)') + '   id: ' + dev.id.slice(0, 8));
+        watchDisconnect();
+      }
+      return dev.gatt.connect();
+    }
+    document.getElementById('bEnum').onclick = async () => {
+      try {
+        const server = await ensureConn(true);
+        log('GATT 已连接，枚举所有主服务…');
+        for (const s of await server.getPrimaryServices()) {
+          log('\n[Service] ' + s.uuid);
+          try { for (const c of await s.getCharacteristics()) { log('   [Char] ' + c.uuid + '  属性: ' + props(c)); if (!ch && isW(c)) ch = c; } }
+          catch (e) { log('   (读不到特征: ' + e.name + ' — 该服务不在 optionalServices 白名单里，或设备不支持)'); }
+        }
+        st.textContent = ch ? '✅ 可写特征 = ' + ch.uuid + '  → 用它发指令' : '⚠ 没枚举到可写特征，请把日志发我';
+        log('\n✅ 枚举完成。' + (ch ? '写特征：' + ch.uuid + '（' + props(ch) + '）' : ''));
+      } catch (e) { log('错误: ' + e.name + ' — ' + e.message); }
+    };
+    document.getElementById('bFast').onclick = async () => {
+      try {
+        const server = await ensureConn(true);
+        const svc = await server.getPrimaryService(SVC);
+        const chars = await svc.getCharacteristics();
+        chars.forEach(c => log('[FFE0 里的特征] ' + c.uuid + '  属性: ' + props(c)));
+        ch = chars.find(c => c.uuid.slice(4, 8).toLowerCase() === CHAR && isW(c)) || chars.find(isW);
+        st.textContent = ch ? '✅ 已连 ' + (dev.name || 'BT24') + '，写特征 = ' + ch.uuid : '⚠ FFE0 里没有可写特征';
+      } catch (e) {
+        log('直连 FFE0 失败: ' + e.name + ' — ' + e.message + '（可能 UUID 被 AT 改过，改用「枚举全部 UUID」看看真实值）');
+      }
+    };
+    async function send(bytes, label) {
+      if (!ch) { log('还没连接（或没找到可写特征）→ 先点上面任一连接按钮'); return; }
+      if (bytes.length === 1 && bytes[0] === 0x71) { log('⚠ 已拦截 0x71：它会关蓝牙'); return; }
+      const d = new Uint8Array(bytes);
+      log('→ 发送 ' + label + ' [' + [...d].map(x => x.toString(16).toUpperCase().padStart(2, '0')).join(' ') + ']');
+      try {
+        if (ch.properties.writeWithoutResponse) await ch.writeValueWithoutResponse(d);
+        else await ch.writeValueWithResponse(d);
+        log('  ✅ 写成功（实物应有反应；没反应＝字节没被固件认下，或 USART2 接线/波特率问题）');
+      } catch (e) {
+        log('  ' + e.name + ' → 降级 writeValue 重试…');
+        try { await ch.writeValue(d); log('  ✅ 写成功(writeValue)'); } catch (e2) { log('  ❌ ' + e2.name + ' — ' + e2.message); }
+      }
+    }
+    document.getElementById('bw').onclick = () => {
+      const h = document.getElementById('hex').value.replace(/[^0-9a-fA-F]/g, '');
+      if (!h || h.length % 2) { log('字节格式：两位十六进制一组，例 09 或 09 0A'); return; }
+      send((h.match(/../g) || []).map(x => parseInt(x, 16)), '手写');
+    };
+    document.querySelectorAll('.cmd').forEach(btn => btn.onclick = () => {
+      document.getElementById('hex').value = btn.dataset.b;
+      send([parseInt(btn.dataset.b, 16)], btn.textContent.trim());
     });
+    document.getElementById('bsweep').onclick = async () => {
+      if (!ch) { log('先连接'); return; }
+      log('开始全字节扫描 0x00-0xFF（跳过 0x71），每 20ms 一个，共 255 个…');
+      let n = 0;
+      for (let b = 0; b <= 0xFF; b++) {
+        if (b === 0x71) continue;
+        await send([b], '扫描 #' + (++n));
+        await new Promise(r => setTimeout(r, 20));
+      }
+      log('✅ 全字节扫描发完：共 ' + n + ' 个字节（STM32 侧上位机应显示 BLE>PC 到 #255）');
+    };
+    document.getElementById('bn').onclick = async () => {
+      if (!ch) { log('先连接'); return; }
+      try {
+        await ch.startNotifications();
+        ch.addEventListener('notificationreceived', e => {
+          const v = new Uint8Array(e.value.buffer, e.value.byteOffset, e.value.byteLength);
+          log('← 收到 [' + [...v].map(x => x.toString(16).toUpperCase().padStart(2, '0')).join(' ') + ']  十进制 ' + [...v].join(',') + '  ASCII:' + [...v].map(x => 32 <= x && x < 127 ? String.fromCharCode(x) : '.').join(''));
+        });
+        log('已订阅 ' + ch.uuid + ' 的 Notify：单片机往 USART2 发的数据会显示在这里。');
+      } catch (e) { log('订阅失败: ' + e.name + ' — ' + e.message + '（该特征不支持 notify，试 FFE0 里的另一个特征）'); }
+    };
   </script>
 </body>
 </html>

@@ -1,6 +1,7 @@
 # BLE 对接协议（Web ↔ STM32 电子狗）
 
 > 依据王子涵固件 `Edog_thewhole(蓝牙)/Core/Src/talk.c` 的 `deal()` 反推，**指令表以固件为准**。2026-10-01 更新。
+> 2026-10-17：模块实物到手＝**DX-BT24**（深圳大夏龙雀 DX-SMART，BLE 5.1，Dialog14531；SRRC 2021DPG828 / CC STS52101096RE / FCC 2AKS8DX-BT24）。其透传 GATT 为公开默认：**Service 0xFFE0 / Characteristic 0xFFE1（Write + Notify）**，网页侧已按此实现（`ble.js`）。
 
 ## 0. 硬件与传输（已确认）
 - 实物＝**STM32F1 电子狗**（OLED 表情 + WS2812 灯 + 舵机腿 + HC-SR04 测距），非 ESP32。
@@ -8,11 +9,13 @@
 - 所以网页只需向该模块的**可写特征写单个字节**，模块透传给 STM32 执行。
 - 收到业务指令后 STM32 会**回显同一字节**到 USART2（可作 ack，若模块支持 Notify）。
 
-## 1. BLE 模块（王子涵确认为 BT24）
-- BT24 是**透传型 BLE 串口模块**（多为 TI CC254x 方案），GATT 由模块固件定。
-- **候选（这类模块通用默认）**：Service `0xFFE0` / Characteristic `0xFFE1`（write + notify）。→ 大概率就是它，但 BT24 有变体、广播名可自配，**以现场枚举为准**。
-- **现场确认工具**：板子上电后用手机(夸克)打开 `ble-scan.html` → 连接 → 自动 dump 出真实广播名 + 全部 service/char UUID 与属性。把结果发我即可写死进协议。
-- 网页发指令＝向该可写特征写**单个字节**（见第 2 节）；模块透传到 STM32 USART2。
+## 1. BLE 模块（DX-BT24，UUID 已定；广播名待现场确认）
+- **Service `0xFFE0` / 特征 `0xFFE1`**：同一特征既可写也可通知 → 网页写指令、订阅 ack 回显都用它。
+- **模式**：模块未被连接时处于 **AT 命令模式**（串口可发 `AT+NAME=` 等改广播名/波特率）；一旦被网页连上即进**透传模式**，写入的字节原样从 RX/TX 脚进出，**无帧头、无长度域**。
+- 串口默认参数 **9600/8/N/1**（若王子涵用 AT 改过，须与 STM32 USART2 初始化一致）。
+- **广播名可自配**（出厂多为 `DX-BT24` 一类），所以网页过滤策略＝先按名字前缀 `DX`/`BT` + 服务 `FFE0`，选不到就**放宽列出所有设备**；现场用 `ble-scan.html` 确认后再写死。
+- **BLE 从机一般只允许一条连接**：手机连上后别再用别的 App 占着，否则网页连不上。
+- **现场确认工具**：`ble-scan.html`（板上电 → 夸克打开 → 连接 → dump 真实广播名/UUID/属性，并可直接按指令表发字节看实物动作、订阅回显）。
 
 ## 2. 真实指令字节表（网页写入的字节 → 动作）
 | 网页发 | 动作 | | 网页发 | 动作 |
@@ -34,20 +37,18 @@
   - "**遥控模式**"＝发离散方向字节(0x03/0x04/0x06/0x07)，每按一次走一步/转一次；可做"点按式遥控"，非平滑比例驾驶。
   - "**点击屏幕目标→实物走到该点**"＝现有固件**做不到**（无定位、离散）。要么退化为"朝该方向发离散动作"（开环不准），要么王子涵**新增定位+导航**（工作量大）。→ 需与王子涵确认取舍。
 
-## 4. 网页端连接与发送（JS 伪码，UUID 待第 1 节补全）
+## 4. 网页端连接与发送（已实现，见 `ble.js`）
 ```js
-const SERVICE = '<模块服务UUID>';   // 待王子涵给
-const CHAR    = '<可写特征UUID>';   // 待王子涵给
-const dev = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] }); // 或 name
-const server = await dev.gatt.connect();
-const svc = await server.getPrimaryService(SERVICE);
-const ch  = await svc.getCharacteristic(CHAR);
-const send = (b) => ch.writeValueWithoutResponse ? ch.writeValueWithoutResponse(new Uint8Array([b])) : ch.writeValue(new Uint8Array([b]));
-send(0x03); // 前进
+import { BleClient } from './ble.js';
+const bt = new BleClient((text, ok) => { /* 显示到界面 */ });
+await bt.connect();            // 用户手势里调用；先按 DX/BT/FFE0 过滤，选不到则列出全部设备
+await bt.writeByte(0x09);      // 跳舞：向 0xFFE1 写 1 字节（writeWithoutResponse，失败自动降级 writeValue）
+await bt.subscribe(bytes => console.log(bytes)); // 订阅 Notify，收固件回显的同一字节当 ack
 ```
 - 必须在**用户手势**里调用（"连接设备"按钮）。
 - 监听 `gattserverdisconnected` 做重连提示。
 - 注意节流：因固件动作门控，连发会被吞，UI 上宜"发一条→等 ack/延时→再发"。
+- **需要 HTTPS 或 localhost**（Web Bluetooth 只在安全上下文可用）；GitHub Pages 的 `https://` 地址即可。
 
 ## 5. AR 侧（本仓已就绪）
 - 引擎 MindAR，夸克实测顺 + 支持 Web Bluetooth（唯一 AR+蓝牙同浏览器可行的组合；APK/WebView 不支持 Web Bluetooth）。
@@ -55,7 +56,14 @@ send(0x03); // 前进
 - "桌子平面"＝打印识别卡所在平面；识别卡尺寸需写死用于像素→mm 换算（若做点击方向指示）。
 
 ## 6. 待定
-- [ ] BLE 模块名 + Service/Char UUID（第 1 节）。
+- [x] BLE Service/Char UUID＝`0xFFE0` / `0xFFE1`（DX-BT24 出厂默认，已按此实现）。
+- [ ] 广播名（AT 可改）→ 现场 `ble-scan.html` 一测即得，之后写死进网页过滤条件。
+- [ ] **三大功能的字节**（最关键）：网页端手势已映射为 **向上指→跳舞、Victory→唱歌、握拳→科普**。固件表里只有 `0x09 跳舞`；**"唱歌""科普"没有对应字节**，它们是否＝语音播报？若是，是否必须先 `0x71` 进语音模式——**而 0x71 会关掉蓝牙，网页一旦发出就断连**。请王子涵给这两个功能的新字节（或在固件里新增两个 Action）。
+- [ ] 网页发完一条指令后要不要用**回显字节做 ack**（固件已回显同一字节）→ 可用来在 AR 里显示"实物已收到"，并实现"发一条→等 ack→再发下一条"的节流。
 - [ ] "点击目标"要不要做（取决于是否加自定位）；不加则改叫"遥控离散动作"。
 - [ ] 识别卡图案(龙马图)与尺寸(mm)。
-- [ ] Status/Notify 回传（电量/动作完成）用于数字孪生同步——可选。
+
+## 7. 网页侧实现状态（本仓）
+- `ble.js`＝DX-BT24 连接与写单字节的封装（含 0x71 拦截、write 属性自动降级、断线提示），hand-horse 与各页共用。
+- `hand-horse.html`：右上角蓝牙状态 chip（可点重连）+ 启动页"连接蓝牙"按钮；手势触发即向 0xFFE1 写 1 字节，屏上显示"已发送/未发送 + 功能名 + 十六进制字节"。
+- `ble-scan.html`：现场调试台（枚举 UUID、按指令表逐条发字节、订阅回显）。

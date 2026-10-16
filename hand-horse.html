@@ -16,6 +16,13 @@
     #start .hint { font-size: 13px; color: #ffd479; max-width: 360px; line-height: 1.6; }
     #panel { position: fixed; bottom: 8px; left: 8px; right: 8px; z-index: 9; display: none; font-size: 12px; color: #eee; background: rgba(0,0,0,.5); padding: 6px 8px; border-radius: 8px; }
     #panel input[type=range]{ width: 90px; vertical-align: middle; }
+    #cmdrow { margin-top: 5px; }
+    .bcmd { width: 30px; text-align: center; background: #000; color: #9fe870; border: 1px solid #444; border-radius: 4px; font: 12px ui-monospace, Consolas, monospace; padding: 2px; }
+    .bsend { background: #149f5a; border: 0; border-radius: 4px; color: #fff; font-size: 11px; padding: 3px 7px; margin: 0 8px 0 2px; cursor: pointer; }
+    #bt { position: fixed; top: 8px; right: 8px; z-index: 11; font: 12px system-ui,"Microsoft YaHei",sans-serif; color: #fff; background: rgba(0,0,0,.65); padding: 7px 10px; border-radius: 8px; border: 1px solid #555; cursor: pointer; max-width: 44vw; }
+    #bt.on { border-color: #37d067; color: #9fe870; }
+    #bt select { background:#22252b; color:#eee; border:1px solid #444; border-radius:6px; padding:2px; margin-top:4px; max-width: 150px; }
+    #start button.bt { background:#149f5a; }
   </style>
 </head>
 <body>
@@ -23,12 +30,14 @@
   <canvas id="gl"></canvas>
   <div id="hud">正在加载…</div>
   <div id="fn"></div>
+  <div id="bt">蓝牙：未连接</div>
 
   <div id="start">
     <h3>龙马 · 张开手掌站在掌心</h3>
     <div class="hint">启动摄像头（建议用前置）→ 对着镜头<b>张开五指</b> → 龙马实时站在掌心、跟随手心朝向；<b>点屏幕任意处</b>，龙马会平滑走到你点的地方、头朝行进方向。</div>
     <select id="cam"></select>
     <button id="go">启动摄像头</button>
+    <button id="goBT" class="bt">连接蓝牙（DX-BT24，可跳过）</button>
   </div>
 
   <div id="panel">
@@ -36,6 +45,12 @@
     转正 <input id="sYaw" type="range" min="0" max="360" step="15" value="0">
     俯仰° <input id="sPitch" type="range" min="-60" max="60" step="5" value="0">
     掌轴° <input id="sRoll" type="range" min="0" max="360" step="15" value="270">
+    <div id="cmdrow">
+      指令字节(十六进制，空＝只屏显不发)：
+      跳舞 <input class="bcmd" id="bDance" data-key="dance" maxlength="2" size="2"><button class="bsend" data-key="dance">发</button>
+      唱歌 <input class="bcmd" id="bSing" data-key="sing" maxlength="2" size="2"><button class="bsend" data-key="sing">发</button>
+      科普 <input class="bcmd" id="bSci" data-key="science" maxlength="2" size="2"><button class="bsend" data-key="science">发</button>
+    </div>
   </div>
 
   <script type="importmap">
@@ -49,6 +64,7 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+    import { BleClient, hex } from './ble.js';
 
     const AUTO='__auto__', sel=document.getElementById('cam');
     const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
@@ -81,15 +97,52 @@
 
     let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, rollDeg=270, prevNormal=new THREE.Vector3(0,0,1), moveTarget=null, created=false;
 
-    // ---- 手势 → 龙马功能（向上指/胜利/握拳 → 跳舞/唱歌/科普）；蓝牙待接入，先屏上显示 ----
+    // ---- 手势 → 龙马功能。固件表(talk.c deal())只有 0x09=跳舞；唱歌/科普的字节由王子涵定，
+    //      未填则只屏显不发送。三个字节都可在下方"指令字节"框现场改（存 localStorage，免重新部署）。
+    //      绝对不要发 0x71（切语音模式会关掉蓝牙）。
     const FN = {
-      'Pointing_Up': { name: '跳舞', cmd: 'DANCE' },
-      'Victory':     { name: '唱歌', cmd: 'SING' },
-      'Closed_Fist': { name: '科普', cmd: 'SCIENCE' }
+      'Pointing_Up': { key: 'dance',   name: '跳舞', byte: 0x09 },
+      'Victory':     { key: 'sing',    name: '唱歌', byte: null },
+      'Closed_Fist': { key: 'science', name: '科普', byte: null }
     };
+    try { Object.values(FN).forEach(f => { const v = localStorage.getItem('fn' + f.key); if (v !== null) f.byte = v === '' ? null : parseInt(v, 16); }); } catch (e) {}
     const fnEl = document.getElementById('fn');
     let fnHold = 0, fnName = '';
-    function sendCommand(cmd){ /* TODO: 蓝牙协议到位后在此向 BT24 特征 writeValue */ console.log('[stub] 发送指令:', cmd); }
+
+    // ---- 蓝牙：DX-BT24 透传（见 ble.js）。手势触发即向 0xFFE1 写 1 字节，实物电子狗执行。
+    const btEl = document.getElementById('bt');
+    const bt = new BleClient((t, ok) => { btEl.textContent = '蓝牙：' + t; btEl.classList.toggle('on', !!ok); });
+    btEl.addEventListener('click', () => bt.connect());
+    const goBT = document.getElementById('goBT');
+    goBT.addEventListener('click', async () => { if (await bt.connect()) goBT.style.display = 'none'; });
+    window.__bt = () => bt.info();
+    async function showFn(fn) {
+      fnEl.style.display = 'block';
+      fnEl.textContent = '已触发：' + fn.name + (fn.byte != null ? ' · 指令 ' + hex(fn.byte) + ' …' : ' · 字节待王子涵确认');
+      if (fn.byte == null) return;
+      const ok = await bt.writeByte(fn.byte);
+      fnEl.textContent = (ok ? '✅ 已发送 ' : '⚠️ 未发送（蓝牙未连） ') + fn.name + ' · 指令 ' + hex(fn.byte);
+    }
+    // 指令字节可现场改：会议上一旦定了"唱歌/科普"的字节，手机上填一次即可（存 localStorage，不必重新部署）
+    const FN_BY_KEY = {}; Object.values(FN).forEach(f => { FN_BY_KEY[f.key] = f; });
+    const toHex = b => b.toString(16).toUpperCase().padStart(2, '0');
+    document.querySelectorAll('.bcmd').forEach(inp => {
+      const f = FN_BY_KEY[inp.dataset.key];
+      inp.value = f.byte == null ? '' : toHex(f.byte);
+      inp.addEventListener('change', () => {
+        const h = inp.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 2);
+        if (!h) { f.byte = null; }
+        else {
+          const b = parseInt(h, 16);
+          if (b === 0x71) { btEl.textContent = '蓝牙：0x71 会关掉蓝牙，已拒绝填入'; inp.value = f.byte == null ? '' : toHex(f.byte); return; }
+          f.byte = b;
+        }
+        inp.value = f.byte == null ? '' : toHex(f.byte);
+        try { localStorage.setItem('fn' + f.key, f.byte == null ? '' : toHex(f.byte)); } catch (e) {}
+      });
+    });
+    document.querySelectorAll('.bsend').forEach(btn => btn.addEventListener('click', ev => { ev.stopPropagation(); showFn(FN_BY_KEY[btn.dataset.key]); }));
+
     const draco=new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
     window.__loadState='pending';
@@ -121,7 +174,7 @@
 
     // 点击屏幕 → 龙马平移到该点（window 上监听 pointerdown，触摸更可靠）
     window.addEventListener('pointerdown', (ev)=>{
-      if(ev.target && ev.target.closest && ev.target.closest('#panel,#hud,#start')) return;
+      if(ev.target && ev.target.closest && ev.target.closest('#panel,#hud,#start,#bt')) return;
       const r=renderer.domElement.getBoundingClientRect();
       const nx=(ev.clientX-r.left)/r.width, ny=(ev.clientY-r.top)/r.height;
       moveTarget = screenToWorld(nx, ny);
@@ -160,14 +213,10 @@
         const open = cat==='Open_Palm' && g && g.score>0.4;
         const fn = FN[cat];
 
-        // 功能手势：去抖(连续2帧) → 发指令 + 屏显“已发送：功能·指令”
+        // 功能手势：去抖(连续2帧) → 屏显 + 经 BT24 发单字节指令
         if(fn){
           fnHold++;
-          if(fnHold>=2){
-            fnEl.style.display='block';
-            fnEl.textContent='已发送：'+fn.name+'   ·   指令 '+fn.cmd;
-            if(fnName!==fn.name){ fnName=fn.name; sendCommand(fn.cmd); }
-          }
+          if(fnHold>=2 && fnName!==fn.name){ fnName=fn.name; showFn(fn); }
         } else { fnHold=0; fnName=''; fnEl.style.display='none'; }
 
         if(open && hand){
@@ -207,7 +256,7 @@
               horse.quaternion.slerp(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(Xw,Yw,Zw)), 0.3);
             }
           }
-          hud.textContent = fn ? ('③ 已触发 «'+fn.name+'»（不跟随·已发指令 '+fn.cmd+'）')
+          hud.textContent = fn ? ('③ 已触发 «'+fn.name+'» '+(fn.byte!=null?hex(fn.byte):'字节待确认')+'（不跟随）')
                               : (cat ? ('手势 '+cat+'（不跟随）· 可点屏幕移动') : '② 没有手 · 点屏幕让龙马移动');
         } else {
           if(horse) horse.visible=false;
