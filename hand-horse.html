@@ -67,6 +67,7 @@
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     import { BleClient, hex } from './ble.js';
+    import { RxBridge } from './rxbridge.js';
 
     const AUTO='__auto__', sel=document.getElementById('cam');
     const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
@@ -119,6 +120,10 @@
     goBT.addEventListener('click', async () => { if (await bt.connect()) goBT.style.display = 'none'; });
     window.__bt = () => bt.info();
     window.__ble = bt;   // 现场诊断用：可在控制台注入假特征，验"发出=回读"的判定
+    // 串口桥：浏览器不投递 Notify 时（Windows Edge 实测如此），改从本机 COM 口读同一份回读
+    const bridge = new RxBridge(bytes => bt.feedExternal(bytes));
+    bridge.start(300);
+    window.__bridge = () => bridge.st;
     let ackToken = 0;   // 只让"最后一次触发"更新屏显，免得迟到的回读把新结果盖掉
     async function showFn(fn) {
       fnEl.style.display = 'block';
@@ -144,7 +149,7 @@
     function renderRx() {
       const a = bt.rx, n = bt.rxTotal;
       if (!a.length) { rxEl.textContent = '串口回读：（还没有数据）  连接后板子每写一个字节都会显示在这里'; return; }
-      rxEl.textContent = '串口回读 共' + n + '字节：' + a.slice(-14).map(hex).join(' ');
+      rxEl.textContent = '回读 共' + n + '字节（' + (bridge.st.ok ? '串口桥在线' : '串口桥未启动，仅靠 Notify') + '）：' + a.slice(-14).map(hex).join(' ');
     }
     bt.onRx = renderRx;
     // 指令字节可现场改：会议上一旦定了"唱歌/科普"的字节，手机上填一次即可（存 localStorage，不必重新部署）

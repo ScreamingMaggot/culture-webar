@@ -111,6 +111,20 @@
       return notifyOn;
     }
     // BluetoothCharacteristicProperties 是布尔属性对象，不是可迭代容器
+    // 串口桥轮询：浏览器不投递 Notify 时，回读改从本机 COM 口那份数据拿
+    let brSeen = 0;
+    setInterval(async () => {
+      try {
+        const j = await (await fetch('http://127.0.0.1:8790/rx.json', { cache: 'no-store' })).json();
+        const arr = j.ble || [];
+        if (arr.length > brSeen) {
+          const fresh = arr.slice(brSeen); brSeen = arr.length;
+          log('← 串口桥回读 [' + fresh.map(x => x.toString(16).toUpperCase().padStart(2, '0')).join(' ') + ']  共 ' + arr.length + ' 个');
+          feedRx(fresh);
+        } else if (arr.length < brSeen) brSeen = arr.length;
+        stat();
+      } catch (e) { /* 桥没启动就安静待着 */ }
+    }, 400);
     const props = c => ['broadcast', 'read', 'writeWithoutResponse', 'write', 'notify', 'indicate', 'reliableWrite', 'writableAuxiliaries']
       .filter(k => c.properties[k]).join(',') || '(无可写/可订阅属性)';
     const isW = c => c.properties.writeWithoutResponse || c.properties.write;

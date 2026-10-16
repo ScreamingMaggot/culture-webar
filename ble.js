@@ -123,6 +123,9 @@ export class BleClient {
     return { sent: true, ack: raced.ack, match: raced.ack === b, waited: raced.waited };
   }
 
+  // 外部注入回读字节：Notify 在本机浏览器不投递时，可改由串口桥喂同一条通道
+  feedExternal(bytes) { this._feed(bytes || []); }
+
   name() { return (this.dev && this.dev.name) || 'BT24'; }
   info() { return { supported: 'bluetooth' in navigator, connected: this.connected, name: this.dev && this.dev.name, char: this.ch && this.ch.uuid,
     props: this.ch && ['read', 'writeWithoutResponse', 'write', 'notify', 'indicate'].filter(k => this.ch.properties[k]).join(',') }; }
