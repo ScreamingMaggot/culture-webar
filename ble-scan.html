@@ -49,8 +49,11 @@
     document.getElementById('st').textContent = 'navigator.bluetooth 存在? ' + (('bluetooth' in navigator) ? 'true' : 'false ❌ 本浏览器不支持（用夸克/Chrome；APK 套壳的 WebView 不行）');
     const el = document.getElementById('log'), st = document.getElementById('st');
     const log = s => { el.textContent += '\n' + s; el.scrollTop = el.scrollHeight; };
-    const SVC = 'ffe0', CHAR = 'ffe1';
-    const OPT = ['ffe0', 'ffe1', 'ffe2', 'ffe3', 'ffe4', 'ffe5', 'ffe6', 'ffe7', 'fff0', 'fff1', 'fff2', 'fff3', 'fff6', 'fff7', 'fff8', 'ff00', 'ff02', 'ae01', 'ae02', 'battery_service', 'device_information'];
+    // Chrome 只认 0x 别名 / 完整 128 位小写 UUID / 官方标准名；裸 'ffe0' 会抛 TypeError: Invalid Service name
+    const u16 = n => '0000' + n + '-0000-1000-8000-00805f9b34fb';
+    const SVC = u16('ffe0'), CHAR = u16('ffe1');
+    const OPT = ['ffe0','ffe1','ffe2','ffe3','ffe4','ffe5','ffe6','ffe7','fff0','fff1','fff2','fff3','fff6','fff7','fff8','ff00','ff02','ae01','ae02'].map(u16)
+              .concat(['battery_service', 'device_information']);
     let dev = null, ch = null;
     // 回读跟踪：等 ack 用事件放行，不用轮询（后台标签页里 setTimeout 会被节流到 1 秒，轮询会把已到的回读误判成没到）
     const CMD_CN = { 0x02:'立正', 0x03:'前进', 0x04:'后退', 0x05:'握手', 0x06:'左转', 0x07:'右转', 0x08:'转圈',
@@ -122,7 +125,7 @@
         const svc = await server.getPrimaryService(SVC);
         const chars = await svc.getCharacteristics();
         chars.forEach(c => log('[FFE0 里的特征] ' + c.uuid + '  属性: ' + props(c)));
-        ch = chars.find(c => c.uuid.slice(4, 8).toLowerCase() === CHAR && isW(c)) || chars.find(isW);
+        ch = chars.find(c => c.uuid.toLowerCase() === CHAR && isW(c)) || chars.find(isW);
         st.textContent = ch ? '✅ 已连 ' + (dev.name || 'BT24') + '，写特征 = ' + ch.uuid : '⚠ FFE0 里没有可写特征';
       } catch (e) {
         log('直连 FFE0 失败: ' + e.name + ' — ' + e.message + '（可能 UUID 被 AT 改过，改用「枚举全部 UUID」看看真实值）');

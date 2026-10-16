@@ -3,7 +3,10 @@
 // 固件只认单字节、离散一次性指令，且上一动作未完不接新指令 → 每次只发 1 字节，不要连发。
 // 绝对不要发 0x71：它切语音模式并关闭蓝牙，连接会当场断。
 
-export const BT24 = { service: 'ffe0', char: 'ffe1' };
+// Chrome 的 Web Bluetooth 只接受 0x 别名、完整 128 位小写 UUID 或官方标准名；裸 'ffe0' 会直接抛
+// TypeError: Invalid Service name。所以一律用完整形式（短名只用来拼）。
+const u16 = n => '0000' + n + '-0000-1000-8000-00805f9b34fb';
+export const BT24 = { service: u16('ffe0'), char: u16('ffe1') };
 const NEVER_SEND = 0x71;
 
 export class BleClient {
@@ -30,7 +33,7 @@ export class BleClient {
       const server = await this.dev.gatt.connect();
       const svc = await server.getPrimaryService(BT24.service);
       const chars = await svc.getCharacteristics();
-      const isTarget = c => c.uuid.slice(4, 8).toLowerCase() === BT24.char;
+      const isTarget = c => c.uuid.toLowerCase() === BT24.char;
       const writable = c => c.properties.writeWithoutResponse || c.properties.write;
       this.ch = chars.find(c => isTarget(c) && writable(c)) || chars.find(writable) || chars[0];
       this.dev.addEventListener('gattserverdisconnected', () => { this.ch = null; this.notifyOk = false; this.s('已断开，点此处重连', false); });
