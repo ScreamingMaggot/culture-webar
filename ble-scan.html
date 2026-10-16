@@ -118,7 +118,11 @@
     let brSeen = 0;
     setInterval(async () => {
       try {
-        const j = await (await fetch('http://127.0.0.1:8790/rx.json', { cache: 'no-store' })).json();
+        let j = null;
+        for (const api of (window.__rxApi ? [window.__rxApi] : ['/rx.json', 'http://127.0.0.1:8790/rx.json'])) {
+          try { const t = await (await fetch(api, { cache: 'no-store' })).json(); if (Array.isArray(t.ble)) { j = t; window.__rxApi = api; break; } } catch (e) { window.__rxApi = null; }
+        }
+        if (!j) return;
         const arr = j.ble || [];
         if (arr.length > brSeen) {
           const fresh = arr.slice(brSeen); brSeen = arr.length;

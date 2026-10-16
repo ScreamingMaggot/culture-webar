@@ -38,8 +38,25 @@ function send(res, code, body, headers = {}) {
   res.end(body);
 }
 
+// 串口桥代理：手机页面是 https，拿不到 http://127.0.0.1:8790（混合内容会被挡）
+// 所以由本服务器代理成同源的 /rx.json —— 页面只 fetch('/rx.json') 即可，无需 CORS、无混合内容问题。
+const BRIDGE = 'http://127.0.0.1:8790/rx.json';
+function proxyRx(res) {
+  http.get(BRIDGE, up => {
+    let body = '';
+    up.setEncoding('utf8');
+    up.on('data', c => body += c);
+    up.on('end', () => send(res, up.statusCode || 200, body, {
+      'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
+    }));
+  }).on('error', () => send(res, 200, JSON.stringify({ ok: false, err: '串口桥没启动：python ../蓝牙测试/serial_bridge.py COM4 19200' }), {
+    'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
+  }));
+}
+
 function handler(req, res) {
   let urlPath = decodeURIComponent(req.url.split('?')[0]);
+  if (urlPath === '/rx.json') return proxyRx(res);
   if (urlPath === '/') urlPath = '/hiro-quickstart.html';
   const filePath = path.join(ROOT, path.normalize(urlPath));
   if (!filePath.startsWith(ROOT)) return send(res, 403, 'Forbidden');
