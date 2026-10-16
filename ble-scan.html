@@ -43,12 +43,16 @@
   </div>
   <div class="hint">⚠ <b>不要发 0x71</b>：它切换语音模式并<b>关闭蓝牙</b>，连接会当场断掉。<br>
     连不上时先查：手机系统蓝牙已开、模块已上电（3.3–5V）、没被别的 App/手机占用（BLE 从机通常只允许一条连接）。</div>
+  <div id="rxstat" style="margin:8px 0;font:13px ui-monospace,Consolas,monospace;color:#7fd0ff">回读计数：0 包</div>
   <div id="log">等待操作…</div>
 
   <script>
     document.getElementById('st').textContent = 'navigator.bluetooth 存在? ' + (('bluetooth' in navigator) ? 'true' : 'false ❌ 本浏览器不支持（用夸克/Chrome；APK 套壳的 WebView 不行）');
     const el = document.getElementById('log'), st = document.getElementById('st');
     const log = s => { el.textContent += '\n' + s; el.scrollTop = el.scrollHeight; };
+    window.onerror = (m, src, line) => { log('⚠ 页面未捕获错误: ' + m + ' @' + line); return false; };  // 免得处理函数抛错时静默无输出
+    const stat = () => { const e = document.getElementById('rxstat'); if (e) e.textContent =
+      '回读计数：' + rxAll.length + ' 包（最近一包 ' + (rxAll.length ? '刚收到' : '还没收到') + '）'; };
     // Chrome 只认 0x 别名 / 完整 128 位小写 UUID / 官方标准名；裸 'ffe0' 会抛 TypeError: Invalid Service name
     const u16 = n => '0000' + n + '-0000-1000-8000-00805f9b34fb';
     const SVC = u16('ffe0'), CHAR = u16('ffe1');
@@ -62,6 +66,7 @@
     window.__inject = c => { ch = c; rxAll = []; rxWaiter = null; notifyOn = false; };   // 自测钩子：注入假特征，验判定逻辑
     function feedRx(bytes) {
       for (const b of bytes) rxAll.push(b);
+      stat();
       if (rxWaiter && rxAll.length > rxWaiter.before) { const w = rxWaiter; rxWaiter = null; w.res(rxAll[rxAll.length - 1]); }
     }
     async function ensureNotify() {
