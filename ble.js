@@ -36,11 +36,11 @@ export class BleClient {
     }
   }
 
-  // 先按 DX-BT24 的常见广播名/服务过滤；选不到就放宽为列出所有设备（名字可能被 AT 改过）
+  // 模块出厂广播名是 "BT24"（手册默认值，AT 可改）→ 按前缀 BT/DX 过滤；选不到就放宽为列出所有设备
   async pick() {
     try {
       return await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'DX' }, { services: [BT24.service] }],
+        filters: [{ namePrefix: 'BT24' }, { namePrefix: 'BT' }, { namePrefix: 'DX' }, { services: [BT24.service] }],
         optionalServices: [BT24.service]
       });
     } catch (e) {
