@@ -93,6 +93,12 @@
         ch = target;
         notifyOn = true;
         log('已订阅 ' + target.uuid.slice(4, 8) + ' 的 Notify');
+        const n0 = rxAll.length;
+        setTimeout(() => {
+          if (rxAll.length === n0) log('6 秒内一包都没到。注意：这不是硬件没通——若 CCC 读回 01 00，说明订阅已写进设备，'
+            + '是这台机器的浏览器没把通知交上来（Windows Edge/Chrome 对部分透传模块有这毛病）。'
+            + '同一时刻用 bleak 直连可收到同样字节时，请改在手机夸克上验（演示机本来就是手机）。');
+        }, 6000);
         // 读回 CCC 的值：01 00 = 模块端确实已开启 notify（那问题在 OS→Edge 的投递）；00 00 或读不到 = Chrome 这侧根本没写对
         try {
           const d = await target.getDescriptor(CCC);

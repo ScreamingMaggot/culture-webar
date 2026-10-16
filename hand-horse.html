@@ -130,7 +130,7 @@
       if (!r.sent) { fnEl.textContent = '⚠️ 未发送 ' + hex(fn.byte) + '（' + fn.name + '）· 蓝牙没连上'; return; }
       if (r.ack == null) {
         fnEl.textContent = bt.notifyOk
-          ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内串口没回读 → 模块→板子 或板子回写没通'
+          ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内没收到回读 → 要么板子→模块这一半不通，要么本浏览器没把 Notify 交上来（ble-scan.html 可分辨）'
           : '⚠️ 已发 ' + hex(fn.byte) + '（' + fn.name + '），但这条特征不支持 Notify，读不到回读';
       } else if (r.match) {
         fnEl.textContent = '✅ 链路闭环：发出 ' + hex(fn.byte) + ' ＝ 串口回读 ' + hex(r.ack) + '（' + fn.name + '）· ' + r.waited + 'ms';

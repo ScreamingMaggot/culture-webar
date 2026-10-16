@@ -3,6 +3,10 @@
 > 依据王子涵固件 `Edog_thewhole(蓝牙)/Core/Src/talk.c` 的 `deal()` 反推，**指令表以固件为准**。2026-10-01 更新。
 > 2026-10-17：模块实物到手＝**DX-BT24**（深圳大夏龙雀 DX-SMART，BLE 5.1，Dialog14531；SRRC 2021DPG828 / CC STS52101096RE / FCC 2AKS8DX-BT24）。其透传 GATT 为公开默认：**Service 0xFFE0 / Characteristic 0xFFE1（Write + Notify）**，网页侧已按此实现（`ble.js`）。
 
+## 0. 浏览器差异（2026-10-17 实测，重要）
+- **Windows Edge/Chrome 的 Web Bluetooth：对本模块订阅 Notify 会"成功但不投递"**。判据已做进 `ble-scan.html`：订阅后自动读回 `CCC(0x2902)`，实测为 `01 00`（=订阅确实写进了设备），但页面收不到任何一包；**同一台电脑用 bleak(WinRT) 直连可稳定收到**（10 秒 12 包）。→ 桌面浏览器只能验"写方向"，**回读/ack 的演示必须在手机上做**。
+- **手机夸克**：AR 顺 + 支持 Web Bluetooth（演示机路径）。注意 UUID 必须写完整形式，裸 `'ffe0'` 在 Chrome 系里直接抛 `Invalid Service name`（已修）。
+
 ## 0. 硬件与传输（已确认）
 - 实物＝**STM32F1 电子狗**（OLED 表情 + WS2812 灯 + 舵机腿 + HC-SR04 测距），非 ESP32。
 - 蓝牙＝**透明串口 BLE 模块**挂在 **USART2**，STM32 **每次收 1 个字节**即解析（`rx2_buffer[1]`）。
