@@ -4,7 +4,7 @@
 > 2026-10-17：模块实物到手＝**DX-BT24**（深圳大夏龙雀 DX-SMART，BLE 5.1，Dialog14531；SRRC 2021DPG828 / CC STS52101096RE / FCC 2AKS8DX-BT24）。其透传 GATT 为公开默认：**Service 0xFFE0 / Characteristic 0xFFE1（Write + Notify）**，网页侧已按此实现（`ble.js`）。
 
 ## 0. 浏览器差异（2026-10-17 实测，重要）
-- **Windows Edge/Chrome 的 Web Bluetooth：对本模块订阅 Notify 会"成功但不投递"**。判据已做进 `ble-scan.html`：订阅后自动读回 `CCC(0x2902)`，实测为 `01 00`（=订阅确实写进了设备），但页面收不到任何一包；**同一台电脑用 bleak(WinRT) 直连可稳定收到**（10 秒 12 包）。→ 桌面浏览器只能验"写方向"，**回读/ack 的演示必须在手机上做**。
+- **Windows Edge/Chrome 的 Web Bluetooth：对本模块订阅 Notify 会"成功但不投递"**。判据已做进 `ble-scan.html`：订阅后自动读回 `CCC(0x2902)`，实测为 `01 00`（=订阅确实写进了设备），但页面收不到任何一包；**同一台电脑用 bleak(WinRT) 直连可稳定收到**（10 秒 12 包）。→ **桌面浏览器的回读改走本机串口桥**（`serial_bridge.py` + `rxbridge.js`，页面自动优先 Notify、拿不到就用桥，判据与来源都会标出来）；手机上仍然走 Notify。实测闭环 159ms。
 - **手机夸克**：AR 顺 + 支持 Web Bluetooth（演示机路径）。注意 UUID 必须写完整形式，裸 `'ffe0'` 在 Chrome 系里直接抛 `Invalid Service name`（已修）。
 
 ## 0. 硬件与传输（已确认）

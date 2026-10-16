@@ -17,6 +17,7 @@ export class BleClient {
     this.rx = [];          // 最近收到的字节（滚动保留 32 个），界面显示"串口读到了什么"
     this.rxTotal = 0;      // 累计计数，用于判断"发出之后有没有新回读"
     this.notifyOk = false; // 是否成功订阅了 Notify（没订阅就永远等不到 ack）
+    this.lastSrc = '—';       // 最近一次回读是从哪条通道来的：Notify / 串口桥
     this.onRx = null;
   }
 
@@ -77,14 +78,18 @@ export class BleClient {
     }
   }
 
-  _feed(bytes) {
+  _feed(bytes, src) {
+    this.lastSrc = src || this.lastSrc || '未知';
     for (const b of bytes) { this.rx.push(b); this.rxTotal++; }
     if (this.rx.length > 32) this.rx.splice(0, this.rx.length - 32);
     if (this.onRx) this.onRx(this.rx.slice());
     // 事件驱动地放行 writeAndAck 的等待：不用轮询（后台标签页里 setTimeout 会被节流到 1 秒，轮询会假报"没回读"）
     if (this._waiter && this.rxTotal > this._waiter.before) {
       const w = this._waiter; this._waiter = null;
-      w.res({ ack: this.rx[this.rx.length - 1], waited: Math.round(performance.now() - w.t0) });
+      // 一批可能来多个字节：优先拿与发出值相同的那个，否则整批比对会假报"不一致"
+      const fresh = this.rx.slice(this.rx.length - (this.rxTotal - w.before));
+      const ack = (w.expect != null && fresh.indexOf(w.expect) >= 0) ? w.expect : this.rx[this.rx.length - 1];
+      w.res({ ack, waited: Math.round(performance.now() - w.t0), multi: fresh.length });
     }
   }
 
@@ -96,7 +101,7 @@ export class BleClient {
       if (!this._subscribed) {
         this.ch.addEventListener('notificationreceived', ev => {
           const v = new Uint8Array(ev.value.buffer, ev.value.byteOffset, ev.value.byteLength);
-          this._feed([...v]);
+          this._feed([...v], 'Notify');
         });
         this._subscribed = true;
       }
@@ -112,7 +117,7 @@ export class BleClient {
     if (this._waiter) this._waiter.res({ ack: null, waited: 0 });      // 上一条还没等到回读就先结掉
     const before = this.rxTotal;
     const t0 = performance.now();
-    const mine = { before, t0, res: null };
+    const mine = { before, t0, res: null, expect: b };
     const wait = new Promise(res => { mine.res = res; this._waiter = mine; });
     const sent = await this.writeByte(b);
     if (!sent) { if (this._waiter === mine) this._waiter = null; return { sent: false, ack: null, match: false, waited: 0 }; }
@@ -124,7 +129,7 @@ export class BleClient {
   }
 
   // 外部注入回读字节：Notify 在本机浏览器不投递时，可改由串口桥喂同一条通道
-  feedExternal(bytes) { this._feed(bytes || []); }
+  feedExternal(bytes) { this._feed(bytes || [], '串口桥'); }
 
   name() { return (this.dev && this.dev.name) || 'BT24'; }
   info() { return { supported: 'bluetooth' in navigator, connected: this.connected, name: this.dev && this.dev.name, char: this.ch && this.ch.uuid,

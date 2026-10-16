@@ -121,8 +121,11 @@
     window.__bt = () => bt.info();
     window.__ble = bt;   // 现场诊断用：可在控制台注入假特征，验"发出=回读"的判定
     // 串口桥：浏览器不投递 Notify 时（Windows Edge 实测如此），改从本机 COM 口读同一份回读
-    const bridge = new RxBridge(bytes => bt.feedExternal(bytes));
-    bridge.start(300);
+    const bridge = new RxBridge(bytes => {
+      const real = bytes.filter(b => b !== 0xB5);      // 0xB5 是测试固件的主动信标，不能当成指令的 ack
+      if (real.length) bt.feedExternal(real);
+    });
+    bridge.start(150);
     window.__bridge = () => bridge.st;
     let ackToken = 0;   // 只让"最后一次触发"更新屏显，免得迟到的回读把新结果盖掉
     async function showFn(fn) {
@@ -138,7 +141,7 @@
           ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内没收到回读 → 要么板子→模块这一半不通，要么本浏览器没把 Notify 交上来（ble-scan.html 可分辨）'
           : '⚠️ 已发 ' + hex(fn.byte) + '（' + fn.name + '），但这条特征不支持 Notify，读不到回读';
       } else if (r.match) {
-        fnEl.textContent = '✅ 链路闭环：发出 ' + hex(fn.byte) + ' ＝ 串口回读 ' + hex(r.ack) + '（' + fn.name + '）· ' + r.waited + 'ms';
+        fnEl.textContent = '✅ 链路闭环：发出 ' + hex(fn.byte) + ' ＝ 回读 ' + hex(r.ack) + '（' + fn.name + '，经 ' + (bt.lastSrc || '?') + '）· ' + r.waited + 'ms';
       } else {
         fnEl.textContent = '❌ 发出 ' + hex(fn.byte) + '（' + fn.name + '）但串口回读 ' + hex(r.ack) + ' → 不一致';
       }
@@ -149,7 +152,8 @@
     function renderRx() {
       const a = bt.rx, n = bt.rxTotal;
       if (!a.length) { rxEl.textContent = '串口回读：（还没有数据）  连接后板子每写一个字节都会显示在这里'; return; }
-      rxEl.textContent = '回读 共' + n + '字节（' + (bridge.st.ok ? '串口桥在线' : '串口桥未启动，仅靠 Notify') + '）：' + a.slice(-14).map(hex).join(' ');
+      rxEl.textContent = '回读 共' + n + '字节 · 来源 ' + (bt.lastSrc || '—') + ' · '
+        + (bridge.st.ok ? '串口桥在线' : '串口桥未启动(仅Notify)') + '：' + a.slice(-14).map(hex).join(' ');
     }
     bt.onRx = renderRx;
     // 指令字节可现场改：会议上一旦定了"唱歌/科普"的字节，手机上填一次即可（存 localStorage，不必重新部署）
