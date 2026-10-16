@@ -18,7 +18,7 @@
   </style>
 </head>
 <body>
-  <h3>DX-BT24 现场调试</h3>
+  <h3>DX-BT24 现场调试 <span id="ver" style="font-size:12px;color:#8ab4f8"></span></h3>
   <div class="hint">
     DX-BT24（大夏龙雀 BLE5.1 透传模块，Dialog14531）：GATT ＝ Service <b>0xFFE0</b> / 特征 <b>0xFFE1</b>（可写 + Notify），数据从其 TX/RX 脚进出，接 STM32 USART2（默认 9600/8/N/1）。<br>
     模块<b>未被连接时处于 AT 命令模式</b>；被网页连上后自动进<b>透传模式</b>：网页写入的字节<b>原样</b>到达单片机串口，不需要额外帧头。<br>
@@ -50,6 +50,9 @@
     document.getElementById('st').textContent = 'navigator.bluetooth 存在? ' + (('bluetooth' in navigator) ? 'true' : 'false ❌ 本浏览器不支持（用夸克/Chrome；APK 套壳的 WebView 不行）');
     const el = document.getElementById('log'), st = document.getElementById('st');
     const log = s => { el.textContent += '\n' + s; el.scrollTop = el.scrollHeight; };
+    const VER = 'B2026-10-17b';                       // 每次改动递增：报错时第一眼看是不是旧缓存
+    document.getElementById('ver').textContent = '版本 ' + VER;
+    setTimeout(() => log('本页版本 ' + VER + '（若报 Invalid Service name: \'ffe0\' 就是浏览器给了旧缓存，用 ?v=数字 重开）'), 50);
     window.onerror = (m, src, line) => { log('⚠ 页面未捕获错误: ' + m + ' @' + line); return false; };  // 免得处理函数抛错时静默无输出
     const stat = () => { const e = document.getElementById('rxstat'); if (e) e.textContent =
       '回读计数：' + rxAll.length + ' 包（最近一包 ' + (rxAll.length ? '刚收到' : '还没收到') + '）'; };

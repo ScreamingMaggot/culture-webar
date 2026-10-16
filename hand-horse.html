@@ -35,7 +35,7 @@
   <div id="bt">蓝牙：未连接</div>
 
   <div id="start">
-    <h3>龙马 · 张开手掌站在掌心</h3>
+    <h3>龙马 · 张开手掌站在掌心 <span id="ver" style="font-size:12px;color:#8ab4f8"></span></h3>
     <div class="hint">启动摄像头（建议用前置）→ 对着镜头<b>张开五指</b> → 龙马实时站在掌心、跟随手心朝向；<b>点屏幕任意处</b>，龙马会平滑走到你点的地方、头朝行进方向。</div>
     <select id="cam"></select>
     <button id="go">启动摄像头</button>
@@ -79,6 +79,8 @@
     list();
 
     const hud=document.getElementById('hud');
+    const VER='H2026-10-17b';   // 页面版本：出问题时先确认不是旧缓存
+    document.getElementById('ver').textContent='版本 '+VER;
     const video=document.getElementById('v');
     const canvas=document.getElementById('gl');
     const md=navigator.mediaDevices, orig=md.getUserMedia.bind(md);
