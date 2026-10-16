@@ -74,8 +74,9 @@
     }
     const CCC = '00002902-0000-1000-8000-00805f9b34fb';
     function onNotify(c) {
-      c.addEventListener('notificationreceived', e => {
-        const v = new Uint8Array(e.value.buffer, e.value.byteOffset, e.value.byteLength);
+      c.addEventListener('characteristicvaluechanged', e => {
+        const dv = e.target.value;
+        const v = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
         log('← 串口回读 [' + [...v].map(x => x.toString(16).toUpperCase().padStart(2, '0')).join(' ') + ']  十进制 ' + [...v].join(',')
             + '  ASCII:' + [...v].map(x => 32 <= x && x < 127 ? String.fromCharCode(x) : '.').join(''));
         feedRx([...v]);

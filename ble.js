@@ -99,10 +99,14 @@ export class BleClient {
     try {
       await this.ch.startNotifications();
       if (!this._subscribed) {
-        this.ch.addEventListener('notificationreceived', ev => {
-          const v = new Uint8Array(ev.value.buffer, ev.value.byteOffset, ev.value.byteLength);
-          this._feed([...v], 'Notify');
-        });
+        // Web Bluetooth 的通知事件叫 characteristicvalueChanged（值在 ev.target.value 这个 DataView 里）；
+      // 'notificationreceived' 在这个 API 里根本不存在——事件名写错时 startNotifications 照样成功、
+      // CCC 照样写成 01 00，页面却永远收不到，极难察觉。
+      this.ch.addEventListener('characteristicvaluechanged', ev => {
+        const dv = ev.target.value;
+        const v = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+        this._feed([...v], 'Notify');
+      });
         this._subscribed = true;
       }
       this.notifyOk = true;
