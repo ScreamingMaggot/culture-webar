@@ -69,18 +69,39 @@
       stat();
       if (rxWaiter && rxAll.length > rxWaiter.before) { const w = rxWaiter; rxWaiter = null; w.res(rxAll[rxAll.length - 1]); }
     }
+    const CCC = '00002902-0000-1000-8000-00805f9b34fb';
+    function onNotify(c) {
+      c.addEventListener('notificationreceived', e => {
+        const v = new Uint8Array(e.value.buffer, e.value.byteOffset, e.value.byteLength);
+        log('← 串口回读 [' + [...v].map(x => x.toString(16).toUpperCase().padStart(2, '0')).join(' ') + ']  十进制 ' + [...v].join(',')
+            + '  ASCII:' + [...v].map(x => 32 <= x && x < 127 ? String.fromCharCode(x) : '.').join(''));
+        feedRx([...v]);
+      });
+    }
     async function ensureNotify() {
-      if (notifyOn || !ch) return notifyOn;
+      if (notifyOn || !dev) return notifyOn;
+      // 先按 UUID 明确取一次特征（大多数人在用的写法），拿不到再退回枚举时缓存的 ch
+      let target = ch;
       try {
-        await ch.startNotifications();
-        ch.addEventListener('notificationreceived', e => {
-          const v = new Uint8Array(e.value.buffer, e.value.byteOffset, e.value.byteLength);
-          log('← 串口回读 [' + [...v].map(x => x.toString(16).toUpperCase().padStart(2, '0')).join(' ') + ']  十进制 ' + [...v].join(',')
-              + '  ASCII:' + [...v].map(x => 32 <= x && x < 127 ? String.fromCharCode(x) : '.').join(''));
-          feedRx([...v]);
-        });
+        const svc = await dev.gatt.getPrimaryService(SVC);
+        target = await svc.getCharacteristic(CHAR);
+        log('诊断：按 UUID 取到特征 ' + target.uuid + '  属性=' + props(target));
+      } catch (e) { log('诊断：按 UUID 取特征失败（' + e.name + '），沿用枚举时的那个对象'); }
+      try {
+        await target.startNotifications();
+        onNotify(target);
+        ch = target;
         notifyOn = true;
-      } catch (e) { log('订阅 Notify 失败: ' + e.name + '（这条特征不支持回读，试 FFE0 里的另一个特征）'); }
+        log('已订阅 ' + target.uuid.slice(4, 8) + ' 的 Notify');
+        // 读回 CCC 的值：01 00 = 模块端确实已开启 notify（那问题在 OS→Edge 的投递）；00 00 或读不到 = Chrome 这侧根本没写对
+        try {
+          const d = await target.getDescriptor(CCC);
+          const v = await d.readValue();
+          const b = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+          log('诊断：FFE1 的 CCC(0x2902) = ' + [...b].map(x => x.toString(16).padStart(2, '0')).join(' ')
+              + (b.length && b[0] === 1 ? '  → 模块端 notify 确实已开' : '  → 模块端 notify 没被打开（Chrome 的订阅没落到设备上）'));
+        } catch (e) { log('诊断：读 CCC 失败 ' + e.name + ' — ' + e.message); }
+      } catch (e) { log('订阅 Notify 失败: ' + e.name + '（' + e.message + '）'); }
       return notifyOn;
     }
     // BluetoothCharacteristicProperties 是布尔属性对象，不是可迭代容器
