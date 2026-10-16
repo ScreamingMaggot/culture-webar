@@ -7,8 +7,15 @@ export const BT24 = { service: 'ffe0', char: 'ffe1' };
 const NEVER_SEND = 0x71;
 
 export class BleClient {
-  // onStatus(text, ok) 用于把连接状态显示到界面上
-  constructor(onStatus) { this.s = onStatus || (() => {}); this.dev = null; this.ch = null; }
+  // onStatus(text, ok) 用于把连接状态显示到界面上；onRx(bytes) 在每次收到串口回读时回调
+  constructor(onStatus) {
+    this.s = onStatus || (() => {});
+    this.dev = null; this.ch = null;
+    this.rx = [];          // 最近收到的字节（滚动保留 32 个），界面显示"串口读到了什么"
+    this.rxTotal = 0;      // 累计计数，用于判断"发出之后有没有新回读"
+    this.notifyOk = false; // 是否成功订阅了 Notify（没订阅就永远等不到 ack）
+    this.onRx = null;
+  }
 
   get connected() { return !!(this.dev && this.dev.gatt && this.dev.gatt.connected && this.ch); }
 
@@ -26,8 +33,11 @@ export class BleClient {
       const isTarget = c => c.uuid.slice(4, 8).toLowerCase() === BT24.char;
       const writable = c => c.properties.writeWithoutResponse || c.properties.write;
       this.ch = chars.find(c => isTarget(c) && writable(c)) || chars.find(writable) || chars[0];
-      this.dev.addEventListener('gattserverdisconnected', () => { this.ch = null; this.s('已断开，点此处重连', false); });
-      this.s('已连接 ' + this.name() + ' ✓ ' + svc.uuid.slice(4, 8) + '/' + this.ch.uuid.slice(4, 8), true);
+      this.dev.addEventListener('gattserverdisconnected', () => { this.ch = null; this.notifyOk = false; this.s('已断开，点此处重连', false); });
+      // 一连上就订阅 Notify：正式固件（talk.c 的 deal 分支）会把收到的字节原样回显，这就是 ack
+      await this.subscribe();
+      this.s('已连接 ' + this.name() + ' ✓ ' + svc.uuid.slice(4, 8) + '/' + this.ch.uuid.slice(4, 8)
+            + (this.notifyOk ? '（回读已订阅）' : '（无 Notify，拿不到回读）'), true);
       return true;
     } catch (e) {
       this.ch = null;
@@ -64,16 +74,50 @@ export class BleClient {
     }
   }
 
-  async subscribe(onData) {
+  _feed(bytes) {
+    for (const b of bytes) { this.rx.push(b); this.rxTotal++; }
+    if (this.rx.length > 32) this.rx.splice(0, this.rx.length - 32);
+    if (this.onRx) this.onRx(this.rx.slice());
+    // 事件驱动地放行 writeAndAck 的等待：不用轮询（后台标签页里 setTimeout 会被节流到 1 秒，轮询会假报"没回读"）
+    if (this._waiter && this.rxTotal > this._waiter.before) {
+      const w = this._waiter; this._waiter = null;
+      w.res({ ack: this.rx[this.rx.length - 1], waited: Math.round(performance.now() - w.t0) });
+    }
+  }
+
+  async subscribe() {
     if (!this.ch) return false;
+    if (!this.ch.properties.notify && !this.ch.properties.indicate) { this.notifyOk = false; return false; }
     try {
       await this.ch.startNotifications();
-      this.ch.addEventListener('notificationreceived', ev => {
-        const v = new Uint8Array(ev.value.buffer, ev.value.byteOffset, ev.value.byteLength);
-        onData([...v]);
-      });
+      if (!this._subscribed) {
+        this.ch.addEventListener('notificationreceived', ev => {
+          const v = new Uint8Array(ev.value.buffer, ev.value.byteOffset, ev.value.byteLength);
+          this._feed([...v]);
+        });
+        this._subscribed = true;
+      }
+      this.notifyOk = true;
       return true;
-    } catch (e) { this.s('订阅回传失败 ' + e.name, false); return false; }
+    } catch (e) { this.notifyOk = false; this.s('订阅回传失败 ' + e.name, false); return false; }
+  }
+
+  // 写一个字节，并等串口那边把同一个字节回读进来（固件 deal() 里的回显）。
+  // 等回读靠事件，不靠轮询；只用一个 setTimeout 做超时兜底。
+  // 返回 {sent, ack, match, waited}：ack=null 表示超时没回读；match 才是"链路完全正常"的判据。
+  async writeAndAck(b, timeoutMs = 2000) {
+    if (this._waiter) this._waiter.res({ ack: null, waited: 0 });      // 上一条还没等到回读就先结掉
+    const before = this.rxTotal;
+    const t0 = performance.now();
+    const mine = { before, t0, res: null };
+    const wait = new Promise(res => { mine.res = res; this._waiter = mine; });
+    const sent = await this.writeByte(b);
+    if (!sent) { if (this._waiter === mine) this._waiter = null; return { sent: false, ack: null, match: false, waited: 0 }; }
+    let timer;
+    const raced = await Promise.race([wait, new Promise(res => { timer = setTimeout(() => res({ ack: null, waited: Math.round(performance.now() - t0) }), timeoutMs); })]);
+    clearTimeout(timer);
+    if (this._waiter === mine) this._waiter = null;                    // 只清自己那条，别把后来者的等待顶掉
+    return { sent: true, ack: raced.ack, match: raced.ack === b, waited: raced.waited };
   }
 
   name() { return (this.dev && this.dev.name) || 'BT24'; }

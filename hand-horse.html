@@ -20,6 +20,7 @@
     .bcmd { width: 30px; text-align: center; background: #000; color: #9fe870; border: 1px solid #444; border-radius: 4px; font: 12px ui-monospace, Consolas, monospace; padding: 2px; }
     .bsend { background: #149f5a; border: 0; border-radius: 4px; color: #fff; font-size: 11px; padding: 3px 7px; margin: 0 8px 0 2px; cursor: pointer; }
     #bt { position: fixed; top: 8px; right: 8px; z-index: 11; font: 12px system-ui,"Microsoft YaHei",sans-serif; color: #fff; background: rgba(0,0,0,.65); padding: 7px 10px; border-radius: 8px; border: 1px solid #555; cursor: pointer; max-width: 44vw; }
+    #rx { position: fixed; left: 8px; right: 8px; bottom: 44px; z-index: 10; font: 12px ui-monospace, Consolas, monospace; color: #7fd0ff; background: rgba(0,0,0,.6); padding: 5px 8px; border-radius: 7px; text-align: center; }
     #bt.on { border-color: #37d067; color: #9fe870; }
     #bt select { background:#22252b; color:#eee; border:1px solid #444; border-radius:6px; padding:2px; margin-top:4px; max-width: 150px; }
     #start button.bt { background:#149f5a; }
@@ -30,6 +31,7 @@
   <canvas id="gl"></canvas>
   <div id="hud">正在加载…</div>
   <div id="fn"></div>
+  <div id="rx">串口回读：（还没有数据）</div>
   <div id="bt">蓝牙：未连接</div>
 
   <div id="start">
@@ -116,13 +118,35 @@
     const goBT = document.getElementById('goBT');
     goBT.addEventListener('click', async () => { if (await bt.connect()) goBT.style.display = 'none'; });
     window.__bt = () => bt.info();
+    window.__ble = bt;   // 现场诊断用：可在控制台注入假特征，验"发出=回读"的判定
+    let ackToken = 0;   // 只让"最后一次触发"更新屏显，免得迟到的回读把新结果盖掉
     async function showFn(fn) {
       fnEl.style.display = 'block';
-      fnEl.textContent = '已触发：' + fn.name + (fn.byte != null ? ' · 指令 ' + hex(fn.byte) + ' …' : ' · 字节待王子涵确认');
-      if (fn.byte == null) return;
-      const ok = await bt.writeByte(fn.byte);
-      fnEl.textContent = (ok ? '✅ 已发送 ' : '⚠️ 未发送（蓝牙未连） ') + fn.name + ' · 指令 ' + hex(fn.byte);
+      if (fn.byte == null) { fnEl.textContent = '已触发：' + fn.name + ' · 还没给指令字节（只屏显，不发送）'; return; }
+      const my = ++ackToken;
+      fnEl.textContent = '已触发：' + fn.name + ' · 发出 ' + hex(fn.byte) + ' … 等串口回读';
+      const r = await bt.writeAndAck(fn.byte, 2000);
+      if (my !== ackToken) return;
+      if (!r.sent) { fnEl.textContent = '⚠️ 未发送 ' + hex(fn.byte) + '（' + fn.name + '）· 蓝牙没连上'; return; }
+      if (r.ack == null) {
+        fnEl.textContent = bt.notifyOk
+          ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内串口没回读 → 模块→板子 或板子回写没通'
+          : '⚠️ 已发 ' + hex(fn.byte) + '（' + fn.name + '），但这条特征不支持 Notify，读不到回读';
+      } else if (r.match) {
+        fnEl.textContent = '✅ 链路闭环：发出 ' + hex(fn.byte) + ' ＝ 串口回读 ' + hex(r.ack) + '（' + fn.name + '）· ' + r.waited + 'ms';
+      } else {
+        fnEl.textContent = '❌ 发出 ' + hex(fn.byte) + '（' + fn.name + '）但串口回读 ' + hex(r.ack) + ' → 不一致';
+      }
+      renderRx();
     }
+    // 串口回读实时窗：不点手势也能看到板子正在推什么上来
+    const rxEl = document.getElementById('rx');
+    function renderRx() {
+      const a = bt.rx, n = bt.rxTotal;
+      if (!a.length) { rxEl.textContent = '串口回读：（还没有数据）  连接后板子每写一个字节都会显示在这里'; return; }
+      rxEl.textContent = '串口回读 共' + n + '字节：' + a.slice(-14).map(hex).join(' ');
+    }
+    bt.onRx = renderRx;
     // 指令字节可现场改：会议上一旦定了"唱歌/科普"的字节，手机上填一次即可（存 localStorage，不必重新部署）
     const FN_BY_KEY = {}; Object.values(FN).forEach(f => { FN_BY_KEY[f.key] = f; });
     const toHex = b => b.toString(16).toUpperCase().padStart(2, '0');
