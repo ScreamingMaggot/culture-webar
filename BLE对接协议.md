@@ -3,13 +3,14 @@
 > 依据王子涵固件 `Edog_thewhole(蓝牙)/Core/Src/talk.c` 的 `deal()` 反推，**指令表以固件为准**。2026-10-01 更新。
 > 2026-10-17：模块实物到手＝**DX-BT24**（深圳大夏龙雀 DX-SMART，BLE 5.1，Dialog14531；SRRC 2021DPG828 / CC STS52101096RE / FCC 2AKS8DX-BT24）。其透传 GATT 为公开默认：**Service 0xFFE0 / Characteristic 0xFFE1（Write + Notify）**，网页侧已按此实现（`ble.js`）。
 
-## 0. 浏览器差异（2026-10-17 实测修正，重要）
-- **夸克：没有 Web Bluetooth 后端**。真点 `requestDevice` 会报 `Web Bluetooth is not supported on this platform`。此前记录"夸克支持蓝牙"是错的（只验了 `'bluetooth' in navigator` 存在，没真调 API）。→ 夸克只能做 AR，不能做蓝牙遥控。
-- **手机 Edge / 桌面 Edge/Chrome：能连能写，但收不到 Notify**。订阅 `startNotifications()` 成功、读回 `CCC(0x2902)=01 00`（订阅确实写进了设备），页面却一包都收不到；同一时刻用 bleak(WinRT) 直连可稳定收到。→ 判为浏览器实现层问题，不再纠缠。
-- **通用解法（已实现）：回读走"同源串口桥"**。`serial_bridge.py` 读 COM4 → `serve.mjs` 代理成 **同源** `/rx.json` → 页面 `fetch('/rx.json')`。手机在 https 页面上取不到 `http://127.0.0.1:8790`（混合内容被挡），同源就没这个问题。
-- 因此**演示组合＝手机 Edge（写指令）+ 电脑跑桥（回读）**，或干脆电脑一站式；页面会自动：Notify 优先、拿不到就用桥，并把来源显示出来。
+## 0. 回读为什么一开始收不到（2026-10-17 定案）
+- **真凶是我们自己的事件名写错**：Web Bluetooth 通知事件叫 `characteristicvaluechanged`（值取 `ev.target.value` 这个 DataView），我写成了 `notificationreceived`——该 API 里不存在这个事件。错得极具误导性：`startNotifications()` 照样 resolve、设备侧 CCC 确实被写成 `01 00`、同一台电脑用 bleak 能稳定收到，于是被误判成"Windows 浏览器不投递"，还为此搭了一层串口桥。现已修正。
+- 防复发：`_test_ble.mjs` 里的假设备**只发规范事件**；把名字改回去，9 项里有 5 项立刻红（已实际反证过）。
+- **夸克确实没有 Web Bluetooth 后端**：真调 `requestDevice` 报 `Web Bluetooth is not supported on this platform`。早先记录“夸克支持蓝牙”是只看 `'bluetooth' in navigator` 存在就下的结论，错。→ 夸克只能做 AR。
+- 桌面/手机 **Edge、Chrome** 可用（能连能写；事件名修正后回读也通）。
+- **串口桥作为第二条独立通道保留**：`serial_bridge.py`(读 COM4) → `serve.mjs` 代理成**同源** `/rx.json` → 页面轮询；页面会标出该字节来自 `Notify` 还是 `串口桥`，两条路任一可用即可给出"发出=回读"判据。
 
-## 0b. 旧记录
+
 - **Windows Edge/Chrome 的 Web Bluetooth：对本模块订阅 Notify 会"成功但不投递"**。判据已做进 `ble-scan.html`：订阅后自动读回 `CCC(0x2902)`，实测为 `01 00`（=订阅确实写进了设备），但页面收不到任何一包；**同一台电脑用 bleak(WinRT) 直连可稳定收到**（10 秒 12 包）。→ **桌面浏览器的回读改走本机串口桥**（`serial_bridge.py` + `rxbridge.js`，页面自动优先 Notify、拿不到就用桥，判据与来源都会标出来）；手机上仍然走 Notify。实测闭环 159ms。
 - **手机夸克**：AR 顺 + 支持 Web Bluetooth（演示机路径）。注意 UUID 必须写完整形式，裸 `'ffe0'` 在 Chrome 系里直接抛 `Invalid Service name`（已修）。
 
