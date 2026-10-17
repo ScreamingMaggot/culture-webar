@@ -24,6 +24,10 @@
     #bt.on { border-color: #37d067; color: #9fe870; }
     #bt select { background:#22252b; color:#eee; border:1px solid #444; border-radius:6px; padding:2px; margin-top:4px; max-width: 150px; }
     #start button.bt { background:#149f5a; }
+    #diag { position: fixed; inset: 0; z-index: 30; display: none; overflow: auto; background: rgba(0,0,0,.93); color: #9fe870;
+            font: 12px/1.7 ui-monospace, Consolas, monospace; padding: 16px 14px 40px; white-space: pre-wrap; -webkit-overflow-scrolling: touch; }
+    #diag .warn { color: #ffd479; } #diag .bad { color: #ff8a8a; } #diag .ok { color: #7fd07f; }
+    #rx { cursor: pointer; }
   </style>
 </head>
 <body>
@@ -33,6 +37,7 @@
   <div id="fn"></div>
   <div id="rx">串口回读：（还没有数据）</div>
   <div id="bt">蓝牙：未连接</div>
+  <div id="diag"></div>
 
   <div id="start">
     <h3>龙马 · 张开手掌站在掌心 <span id="ver" style="font-size:12px;color:#8ab4f8"></span></h3>
@@ -40,6 +45,7 @@
     <select id="cam"></select>
     <button id="go">启动摄像头</button>
     <button id="goBT" class="bt">连接蓝牙（DX-BT24，可跳过）</button>
+    <button id="goDiag" style="background:#37517a;font-size:13px;padding:9px 18px">自检：蓝牙哪一环不通</button>
   </div>
 
   <div id="panel">
@@ -52,6 +58,7 @@
       跳舞 <input class="bcmd" id="bDance" data-key="dance" maxlength="2" size="2"><button class="bsend" data-key="dance">发</button>
       唱歌 <input class="bcmd" id="bSing" data-key="sing" maxlength="2" size="2"><button class="bsend" data-key="sing">发</button>
       科普 <input class="bcmd" id="bSci" data-key="science" maxlength="2" size="2"><button class="bsend" data-key="science">发</button>
+      <button class="bsend" id="btnDiag" style="background:#37517a">自检</button>
     </div>
   </div>
 
@@ -66,8 +73,9 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-    import { BleClient, hex } from './ble.js';
-    import { RxBridge } from './rxbridge.js';
+    // 导入带 ?v=：GitHub Pages 对 .js 有缓存，手机改了 ble.js 却仍在跑旧的那份时会看不出差别
+    import { BleClient, hex } from './ble.js?v=H2026-10-17c';
+    import { RxBridge } from './rxbridge.js?v=H2026-10-17c';
 
     const AUTO='__auto__', sel=document.getElementById('cam');
     const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
@@ -79,7 +87,7 @@
     list();
 
     const hud=document.getElementById('hud');
-    const VER='H2026-10-17b';   // 页面版本：出问题时先确认不是旧缓存
+    const VER='H2026-10-17c';   // 页面版本：出问题时先确认不是旧缓存
     document.getElementById('ver').textContent='版本 '+VER;
     const video=document.getElementById('v');
     const canvas=document.getElementById('gl');
@@ -140,10 +148,10 @@
       if (!r.sent) { fnEl.textContent = '⚠️ 未发送 ' + hex(fn.byte) + '（' + fn.name + '）· 蓝牙没连上'; return; }
       if (r.ack == null) {
         fnEl.textContent = bt.notifyOk
-          ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内没收到回读 → 要么板子→模块这一半不通，要么本浏览器没把 Notify 交上来（ble-scan.html 可分辨）'
+          ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内没收到回读 → 点下方回读窗看"自检"，能直接分辨是订阅没落到模块、还是系统不投递'
           : '⚠️ 已发 ' + hex(fn.byte) + '（' + fn.name + '），但这条特征不支持 Notify，读不到回读';
       } else if (r.match) {
-        fnEl.textContent = '✅ 链路闭环：发出 ' + hex(fn.byte) + ' ＝ 回读 ' + hex(r.ack) + '（' + fn.name + '，经 ' + (bt.lastSrc || '?') + '）· ' + r.waited + 'ms';
+        fnEl.textContent = '✅ 链路闭环：发出 ' + hex(fn.byte) + ' ＝ 回读 ' + hex(r.ack) + '（' + fn.name + '，经 ' + (r.src || bt.lastSrc || '?') + '）· ' + r.waited + 'ms';
       } else {
         fnEl.textContent = '❌ 发出 ' + hex(fn.byte) + '（' + fn.name + '）但串口回读 ' + hex(r.ack) + ' → 不一致';
       }
@@ -153,11 +161,53 @@
     const rxEl = document.getElementById('rx');
     function renderRx() {
       const a = bt.rx, n = bt.rxTotal;
-      if (!a.length) { rxEl.textContent = '串口回读：（还没有数据）  连接后板子每写一个字节都会显示在这里'; return; }
+      if (!a.length) { rxEl.textContent = '串口回读：（还没有数据）  点此处＝自检，能看出蓝牙哪一环不通'; return; }
       rxEl.textContent = '回读 共' + n + '字节 · 来源 ' + (bt.lastSrc || '—') + ' · '
-        + (bridge.st.ok ? '串口桥在线' : '串口桥未启动(仅Notify)') + '：' + a.slice(-14).map(hex).join(' ');
+        + (bridge.st.ok ? '串口桥在线' : '串口桥未启动(仅Notify)') + '：' + a.slice(-14).map(hex).join(' ') + '（点此自检）';
     }
     bt.onRx = renderRx;
+
+    // ---- 自检：一旦"发得出、读不回"，把判定所需的事实一次摊开（点底部回读窗 或 自检按钮）
+    const diagEl = document.getElementById('diag');
+    const row = (k, v, cls) => '<span class="' + (cls || '') + '">' + k + '：' + v + '</span>\n';
+    function verdict(d) {
+      const out = [];
+      const push = (cls, t) => out.push('<span class="' + cls + '">· ' + t + '</span>');
+      const nN = bt.srcCount['Notify'] || 0, nB = bt.srcCount['串口桥'] || 0;
+      if (!d['本浏览器支持']) push('bad', '这个浏览器没有 Web Bluetooth（夸克、各类 App 内嵌 WebView 都不行）→ 换 Edge 或 Chrome。');
+      else if (!d['已连接']) push('bad', '还没连上 BT24 → 点右上角"蓝牙"，在弹窗里选 BT24；列表里没有＝模块没在广播或被别的设备连着（BT24 只允许一条连接）。');
+      else if (!d['已订阅Notify']) push('bad', '没订阅上 Notify（特征能力里没有 notify，或系统拒了）→ 只能靠串口桥给判据。');
+      else if (d['CCC(0x2902)'].indexOf('没被打开') >= 0) push('bad', 'CCC 不是 01 → 订阅没落到模块上：手机"设置→应用→Edge→权限→附近的设备/蓝牙"授权后重连。');
+      else if (!nN) push('warn', 'CCC=01（模块端 notify 确实开了），但 Notify 一个字节都没交给浏览器 → 这一侧系统不投递。'
+        + (nB ? '串口桥已补上 ' + nB + ' 字节，判据照样成立（结论里来源显示"串口桥"）。' : '串口桥也没数据：先点自检下面的"桥"看是不是没连上 http 页面/桥没启动。'));
+      else push('ok', 'Notify 正常投递（' + nN + ' 字节）→ 回读走的是空中链路，闭环成立（串口桥另收 ' + nB + ' 字节）。');
+      push('warn', '测手机前：电脑上那个蓝牙页面必须彻底关掉。BT24 一次只允许一条连接，两边抢连会出现"写进去没回读"这种半死状态。');
+      return out.join('\n');
+    }
+    async function runDiag() {
+      diagEl.style.display = 'block';
+      diagEl.textContent = '自检中…（读模块的 CCC 要 1 秒左右）';
+      const d = await bt.diag();
+      let h = row('本页版本', VER + '　' + location.host + location.pathname) + row('UA', navigator.userAgent);
+      h += '\n—— 蓝牙 ——\n';
+      for (const k of Object.keys(d)) h += row(k, d[k]);
+      h += '\n—— 串口桥 ——\n';
+      for (const api of ['/rx.json', 'http://127.0.0.1:8790/rx.json']) {
+        try {
+          const r = await fetch(api, { cache: 'no-store' });
+          const t = await r.json();
+          h += row('桥 ' + api, r.status === 200 && t.ok !== false
+            ? '在线 · 空中到电脑 ' + (t.ble || []).length + ' 字节 · 心跳 ' + (t.hb == null ? '?' : t.hb)
+            : '通了但没连上串口：' + (t.err || '未连'), r.status === 200 && t.ok !== false ? '' : 'warn');
+        } catch (e) { h += row('桥 ' + api, '取不到（' + e.name + '）→ 手机只能靠 Notify', 'warn'); }
+      }
+      diagEl.innerHTML = h + '\n—— 判读 ——\n' + verdict(d) + '\n（点此处关闭）';
+    }
+    diagEl.addEventListener('click', () => { diagEl.style.display = 'none'; });
+    rxEl.addEventListener('click', runDiag);
+    document.getElementById('btnDiag').addEventListener('click', ev => { ev.stopPropagation(); runDiag(); });
+    document.getElementById('goDiag').addEventListener('click', runDiag);
+    window.__diag = runDiag;
     // 指令字节可现场改：会议上一旦定了"唱歌/科普"的字节，手机上填一次即可（存 localStorage，不必重新部署）
     const FN_BY_KEY = {}; Object.values(FN).forEach(f => { FN_BY_KEY[f.key] = f; });
     const toHex = b => b.toString(16).toUpperCase().padStart(2, '0');
@@ -209,7 +259,7 @@
 
     // 点击屏幕 → 龙马平移到该点（window 上监听 pointerdown，触摸更可靠）
     window.addEventListener('pointerdown', (ev)=>{
-      if(ev.target && ev.target.closest && ev.target.closest('#panel,#hud,#start,#bt')) return;
+      if(ev.target && ev.target.closest && ev.target.closest('#panel,#hud,#start,#bt,#rx,#diag')) return;
       const r=renderer.domElement.getBoundingClientRect();
       const nx=(ev.clientX-r.left)/r.width, ny=(ev.clientY-r.top)/r.height;
       moveTarget = screenToWorld(nx, ny);

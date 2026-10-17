@@ -18,6 +18,7 @@ export class BleClient {
     this.rxTotal = 0;      // 累计计数，用于判断"发出之后有没有新回读"
     this.notifyOk = false; // 是否成功订阅了 Notify（没订阅就永远等不到 ack）
     this.lastSrc = '—';       // 最近一次回读是从哪条通道来的：Notify / 串口桥
+    this.srcCount = {};       // 每条通道各收到多少字节——手机上一旦"不确定是谁送的"，看这个数
     this.onRx = null;
   }
 
@@ -80,6 +81,7 @@ export class BleClient {
 
   _feed(bytes, src) {
     this.lastSrc = src || this.lastSrc || '未知';
+    this.srcCount[this.lastSrc] = (this.srcCount[this.lastSrc] || 0) + bytes.length;
     for (const b of bytes) { this.rx.push(b); this.rxTotal++; }
     if (this.rx.length > 32) this.rx.splice(0, this.rx.length - 32);
     if (this.onRx) this.onRx(this.rx.slice());
@@ -89,7 +91,7 @@ export class BleClient {
       // 一批可能来多个字节：优先拿与发出值相同的那个，否则整批比对会假报"不一致"
       const fresh = this.rx.slice(this.rx.length - (this.rxTotal - w.before));
       const ack = (w.expect != null && fresh.indexOf(w.expect) >= 0) ? w.expect : this.rx[this.rx.length - 1];
-      w.res({ ack, waited: Math.round(performance.now() - w.t0), multi: fresh.length });
+      w.res({ ack, waited: Math.round(performance.now() - w.t0), multi: fresh.length, src: this.lastSrc });
     }
   }
 
@@ -129,7 +131,34 @@ export class BleClient {
     const raced = await Promise.race([wait, new Promise(res => { timer = setTimeout(() => res({ ack: null, waited: Math.round(performance.now() - t0) }), timeoutMs); })]);
     clearTimeout(timer);
     if (this._waiter === mine) this._waiter = null;                    // 只清自己那条，别把后来者的等待顶掉
-    return { sent: true, ack: raced.ack, match: raced.ack === b, waited: raced.waited };
+    return { sent: true, ack: raced.ack, match: raced.ack === b, waited: raced.waited, src: raced.src || this.lastSrc };
+  }
+
+  // 手机/电脑"哪一环不通"一次性列出来：连接、特征能力、CCC（订阅有没有真的落到模块上）、各通道各收了多少字节
+  async diag() {
+    const d = {
+      '本浏览器支持': 'bluetooth' in navigator,
+      '已连接': this.connected,
+      'GATT': !!(this.dev && this.dev.gatt && this.dev.gatt.connected),
+      '设备名': (this.dev && this.dev.name) || '—',
+      '特征': this.ch ? this.ch.uuid.slice(4, 8) : '—',
+      '特征能力': this.ch ? ['read', 'writeWithoutResponse', 'write', 'notify', 'indicate'].filter(k => this.ch.properties[k]).join(',') : '—',
+      '已订阅Notify': this.notifyOk,
+      '回读总数': this.rxTotal,
+      '各通道': Object.entries(this.srcCount).map(([k, v]) => k + ' ' + v).join(' / ') || '一条都没收到',
+      '最近8字节': this.rx.slice(-8).map(hex).join(' ') || '—',
+      'CCC(0x2902)': '未读',
+    };
+    if (this.ch) {
+      try {
+        const cd = await this.ch.getDescriptor('00002902-0000-1000-8000-00805f9b34fb');
+        const v = await cd.readValue();
+        const b = new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+        d['CCC(0x2902)'] = [...b].map(x => x.toString(16).padStart(2, '0')).join(' ')
+          + ((b[0] & 1) ? ' → 模块端 notify 确实开了' : ' → 模块端 notify 没被打开');
+      } catch (e) { d['CCC(0x2902)'] = '读不到（' + e.name + '）'; }
+    }
+    return d;
   }
 
   // 外部注入回读字节：Notify 在本机浏览器不投递时，可改由串口桥喂同一条通道

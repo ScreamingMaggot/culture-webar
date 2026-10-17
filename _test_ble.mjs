@@ -39,6 +39,7 @@ console.log('writeAndAck 判据：');
 const [cOk, rOk] = await run('ok');
 chk('回显相同 → 判一致', rOk.match === true && rOk.ack === 0x09, JSON.stringify(rOk));
 chk('回读来源标成 Notify', cOk.lastSrc === 'Notify', 'src=' + cOk.lastSrc);
+chk('结论里带来源（手机自检要用它分辨 Notify/串口桥）', rOk.src === 'Notify', 'src=' + rOk.src);
 const [, rWrong] = await run('wrong');
 chk('回显不同 → 报不一致（不许假绿）', rWrong.ack === 0xEE && !rWrong.match, JSON.stringify(rWrong));
 const [, rNone] = await run('none', undefined, 600);
@@ -60,6 +61,15 @@ await new Promise(r => setTimeout(r, 120));
 c9.feedExternal([0xB5, 0x09]);
 const r9 = await p9;
 chk('Notify 拿不到时串口桥能补上 ack', r9.match === true && c9.lastSrc === '串口桥', JSON.stringify(r9) + ' src=' + c9.lastSrc);
+chk('结论里的来源是串口桥（不是假称 Notify）', r9.src === '串口桥', 'src=' + r9.src);
+chk('每条通道各收多少字节有分账', cOk.srcCount.Notify === 1 && c9.srcCount['串口桥'] === 2, JSON.stringify([cOk.srcCount, c9.srcCount]));
+
+// 自检面板：手机上一旦读不回，靠这几个字段定位。假特征没有 getDescriptor，必须稳当地降级成"读不到"。
+const dg = await cOk.diag();
+chk('自检报告含 CCC/各通道/已订阅', 'CCC(0x2902)' in dg && '各通道' in dg && dg['已订阅Notify'] === true && dg['特征能力'].includes('notify'), JSON.stringify(dg));
+chk('自检在无描述符的浏览器上也不炸', String(dg['CCC(0x2902)']).startsWith('读不到'), dg['CCC(0x2902)']);
+const dgOff = await new BleClient(() => {}).diag();
+chk('没连上时自检如实说未连接', dgOff['已连接'] === false && dgOff['各通道'] === '一条都没收到', JSON.stringify(dgOff));
 
 console.log('\n通过 %d / 失败 %d', pass, fail);
 process.exit(fail ? 1 : 0);
