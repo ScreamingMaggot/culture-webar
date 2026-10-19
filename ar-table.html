@@ -18,6 +18,9 @@
     #bar button.gray { background: #333; }
     #panel { position: fixed; bottom: 8px; left: 8px; right: 8px; z-index: 6; display: none; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 10px; font-size: 12px; }
     #panel input[type=range] { width: 90px; vertical-align: middle; }
+    #st { position: fixed; top: 56px; left: 8px; right: 8px; z-index: 6; text-align: center; font-size: 13px;
+          color: #9fe870; background: rgba(0,0,0,.66); padding: 6px 8px; border-radius: 8px; }
+    #st.warn { color: #ffd479; }
     #start { position: fixed; inset: 0; z-index: 20; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: #14161a; text-align: center; padding: 24px; }
     #start select { padding: 10px; border-radius: 10px; background: #22252b; color: #eee; border: 1px solid #444; }
     #start button { padding: 14px 26px; border: 0; border-radius: 12px; font-size: 17px; font-weight: 700; color: #fff; background: #2f6fed; cursor: pointer; }
@@ -29,7 +32,7 @@
   <canvas id="gl"></canvas>
 
   <div id="start">
-    <h3>龙马 AR 桌面 <span style="font-size:12px;color:#8ab4f8">版本 T2026-10-17d</span></h3>
+    <h3>龙马 AR 桌面 <span style="font-size:12px;color:#8ab4f8">版本 T2026-10-17e</span></h3>
     <div class="hint">固定机位对准桌面 → 启动 → 把 4 个蓝点拖到桌面一个已知真实尺寸的矩形四角 → 填 宽×深(米) → 标定 → 点桌面让龙马走过去。<br><b>标定完成前画面不会出现龙马</b>（没有尺寸依据时它只有几十像素高）。</div>
     <div><select id="cam"></select></div>
     <button id="go">启动摄像头</button>
@@ -39,6 +42,7 @@
     <svg id="cline"><polygon id="quad" fill="rgba(47,111,237,.12)" stroke="#2f6fed" stroke-width="2" points=""></polygon></svg>
     <div class="corner" id="c0"></div><div class="corner" id="c1"></div><div class="corner" id="c2"></div><div class="corner" id="c3"></div>
   </div>
+  <div id="st">模型加载中…</div>
   <div id="bar" style="display:none">
     <label>宽(米)<input id="W" type="number" value="0.6" step="0.1"></label>
     <label>深(米)<input id="D" type="number" value="0.4" step="0.1"></label>
@@ -89,7 +93,8 @@
       model.scale.setScalar(1/modelH);
       holder = new THREE.Group(); holder.add(model); holder.visible = false; scene.add(holder);
       document.getElementById('mode').textContent = '模型就绪：标定四角后出现在桌面';
-    }, undefined, () => { document.getElementById('mode').textContent = '模型加载失败'; });
+      setSt('模型已就绪（a19.min.glb）· 尚未标定 → ① 拖四角 ② 填宽深 ③ 点“标定”', true);
+    }, undefined, (e) => { document.getElementById('mode').textContent = '模型加载失败'; setSt('模型加载失败：' + ((e && e.message) || e) + ' → 检查网络/刷新', true); });
 
     // ---- 摄像头（deviceId 改写，兼容夸克）----
     const AUTO='__auto__', sel=document.getElementById('cam');
@@ -173,6 +178,9 @@
     });
 
     // 点投影到屏幕（表坐标->屏幕） -> 转 three 世界(z=0) 放置基座
+    const stEl = document.getElementById('st');
+    function setSt(t, warn) { stEl.textContent = t; stEl.classList.toggle('warn', !!warn); }
+
     function place(){
       if(!holder) return;
       // 没标定就没有"桌面到画面"的尺寸依据：此时算出来的模型只有几十像素高，
@@ -191,6 +199,11 @@
         holder.rotation.y = -Math.atan2(dv[1], dv[0]) + Math.PI/2; // 屏幕内朝向行进
       }
       holder.visible=true;
+      if ((place.n = (place.n || 0) + 1) % 12 === 0) {
+        const hPx = holder.scale.x * ppw;
+        setSt('已标定 · 模型在桌面中心 · 屏上高约 ' + Math.round(hPx) + ' 像素'
+          + (hPx < 40 ? ' ⚠ 太小：检查四角是否框住整张桌面、宽深是否填对' : '') + ' · 点桌面让它走', hPx < 40);
+      }
     }
 
     let last=0;
