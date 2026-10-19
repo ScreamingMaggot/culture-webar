@@ -666,6 +666,7 @@
       calib.classList.remove('hidden');
       modeEl.textContent = '① 拖四角 ② 填宽深 ③ 点标定';
       resetCorners();
+      layoutOverlays();
       setSt('模型已就绪 · 尚未标定 → ① 拖四角 ② 填宽深 ③ 点“标定”', true);
       let last = 0;
       (function loop(ts) {
@@ -707,6 +708,7 @@
     async function start(mode, btn) {
       MODE = mode;
       document.body.classList.toggle('table', mode === 'table');
+      layoutOverlays();
       const mc = document.getElementById('modeChip'); if (mc) mc.textContent = (mode === 'table') ? '桌面' : '掌心';
       // 自动选摄像头：掌心用前置、桌面用后置；用户手动选过则尊重
       if (sel.value === AUTO || !sel.value) {
@@ -737,6 +739,8 @@
       const base = (p && getComputedStyle(p).display !== 'none') ? p.offsetHeight + 24 : 12;
       rxEl.style.bottom = base + 'px';
       fnEl.style.bottom = (base + 14) + 'px';
+      const bar = document.getElementById('bar');
+      if (bar && getComputedStyle(bar).display !== 'none') stEl.style.top = (bar.offsetHeight + 24) + 'px';
     }
     addEventListener('resize', layoutOverlays);
     layoutOverlays();
