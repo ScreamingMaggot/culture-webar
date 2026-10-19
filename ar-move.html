@@ -72,15 +72,14 @@
     // ---- 模型切换：三个模型的本地轴不同，统一成"头=-X、上=+Y、底面 y=0" ----
     const MODEL_PRESETS = {
       a19:    { name: '龙马 A19（当前）', url: './assets/a19.min.glb',    rx: -90, scale: 0.060 },
-      a30:    { name: '龙马 A30',        url: './assets/a30.min.glb',    rx: -90, scale: 0.064 },
       longma: { name: '龙马 Longma',     url: './assets/longma.min.glb', rx: 0,   scale: 0.624 }
     };
     function wireModel() {
       const sel = document.getElementById('sModel');
       if (!sel) return;
       Object.entries(MODEL_PRESETS).forEach(([id, m]) => { const o=document.createElement('option'); o.value=id; o.textContent=m.name; sel.appendChild(o); });
-      let saved = null; try { saved = localStorage.getItem('cardModel'); } catch (e) {}
-      sel.value = MODEL_PRESETS[saved] ? saved : 'a19';
+      let saved = null; try { saved = localStorage.getItem('cardModelV2'); } catch (e) {}
+      sel.value = MODEL_PRESETS[saved] ? saved : 'longma';
       const apply = () => {
         const el = document.querySelector('#horse');
         if (!el) return;

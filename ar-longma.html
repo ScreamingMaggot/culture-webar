@@ -246,7 +246,7 @@
     </div>
     <div class="table-only">
       <div class="grid sliders">
-        <label class="slider"><span>真实高度</span><input id="sSize" type="range" min="0.05" max="0.8" step="0.01" value="0.3"><output id="oSSize">0.30 m</output></label>
+        <label class="slider"><span>真实高度</span><input id="sSize" type="range" min="0.05" max="1.6" step="0.01" value="0.6"><output id="oSSize">0.60 m</output></label>
         <label class="slider"><span>速度</span><input id="sSpeed" type="range" min="0.05" max="1.5" step="0.05" value="0.3"><output id="oSSpeed">0.30 m/s</output></label>
       </div>
       <div class="row hintline">点桌面置目标点，龙马按真实米制速度走过去</div>
@@ -409,8 +409,8 @@
 
     const modelSel = document.getElementById('modelSel');
     Object.entries(MODELS).forEach(([id, m]) => { const o = document.createElement('option'); o.value = id; o.textContent = m.name; modelSel.appendChild(o); });
-    const savedModel = (() => { try { return localStorage.getItem('longmaModel'); } catch (e) { return null; } })();
-    modelSel.value = MODELS[savedModel] ? savedModel : 'a19';
+    const savedModel = (() => { try { return localStorage.getItem('longmaModelV2'); } catch (e) { return null; } })();
+    modelSel.value = MODELS[savedModel] ? savedModel : 'longma';
     function ensureCustomOption(name) {
       let o = modelSel.querySelector('option[value="__custom__"]');
       if (!o) { o = document.createElement('option'); o.value = '__custom__'; modelSel.appendChild(o); }
@@ -418,7 +418,7 @@
       return o;
     }
     modelSel.addEventListener('change', () => {
-      try { localStorage.setItem('longmaModel', modelSel.value); } catch (e) {}
+      try { localStorage.setItem('longmaModelV2', modelSel.value); } catch (e) {}
       document.getElementById('customRow').style.display = (modelSel.value === '__custom__') ? 'flex' : 'none';
       loadModel(modelSel.value);
     });
@@ -689,7 +689,7 @@
 
     // ================= 桌面模式（四角标定 + 透视相机） =================
     let H = null, Hinv = null, pose = null, cur = { x: 0, z: 0 }, tgt = null;
-    let tableSpeed = 0.3, tableSize = 0.3;
+    let tableSpeed = 0.3, tableSize = 0.6;
     document.getElementById('sSpeed').addEventListener('input', e => tableSpeed = +e.target.value);
     document.getElementById('sSize').addEventListener('input', e => tableSize = +e.target.value);
 
