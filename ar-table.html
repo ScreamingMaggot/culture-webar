@@ -32,7 +32,7 @@
   <canvas id="gl"></canvas>
 
   <div id="start">
-    <h3>龙马 AR 桌面 <span style="font-size:12px;color:#8ab4f8">版本 T2026-10-19h</span></h3>
+    <h3>龙马 AR 桌面 <span style="font-size:12px;color:#8ab4f8">版本 T2026-10-19i</span></h3>
     <div class="hint">固定机位对准桌面 → 启动 → 把 4 个蓝点拖到桌面一个已知真实尺寸的矩形四角 → 填 宽×深(米) → 点“标定”。<br>
       <b>标定完成后龙马才出现</b>：它的底面就落在四角围出的桌面上，渲染透视由这四个点解出的虚拟相机决定，与画面里的桌面一致。</div>
     <div><select id="cam"></select></div>
@@ -67,7 +67,7 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=T2026-10-19h';
+    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=T2026-10-19i';
 
     const stEl = document.getElementById('st'), modeEl = document.getElementById('mode');
     const setSt = (t, warn) => { stEl.textContent = t; stEl.classList.toggle('warn', !!warn); };
@@ -90,12 +90,22 @@
     const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
     loader.load('./assets/a19.min.glb', g => {
       const model = g.scene;
+      // 模型是"趴着"导出的（用 Draco 解出的顶点离线分析得出）：
+      //   · 沿局部 Z 的底部切片恰好 4 个连通簇 → 四条腿在 Z=0，局部 +Z 是"上"；
+      //   · 沿局部 X 最高 15% 的点质心 x≈99、z≈102（靠近最大端且在高处）→ 局部 +X 是"头朝"；
+      //   · 关于 y=0 完全对称 → 局部 Y 是左右轴。
+      // 先把局部 X/Y/Z 依次转到世界 +Z/+X/+Y，再按旋转后的包围盒做居中与落地。
+      model.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+        new THREE.Vector3(0, 0, 1),    // 局部 +X（头朝）→ 世界 +Z（前）
+        new THREE.Vector3(1, 0, 0),    // 局部 +Y（左右）→ 世界 +X
+        new THREE.Vector3(0, 1, 0)));  // 局部 +Z（上）  → 世界 +Y
+      model.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(model);
       const size = new THREE.Vector3(); box.getSize(size);
       const c = new THREE.Vector3(); box.getCenter(c);
       // 关键：平移量必须和缩放放在同一层。
       // 若把 scale 加在 model（子节点）上，model.position 不会被它自己的缩放影响——
-      // 这个模型的包围盒是 214×155×125、中心 (6.6,0,62.7)，平移 77.7 单位后
+      // 这个模型的包围盒是 214.8×155.4×125.5、中心 (6.6,0,62.7)，平移 77.7 单位后
       // 再乘 holder 的米制缩放，会落到桌上 20 多米外，看上去就是"没有模型"。
       model.position.set(-c.x, -box.min.y, -c.z);
       const hy = (size.y > 0.3 * Math.max(size.x, size.y, size.z)) ? size.y : Math.max(size.x, size.y, size.z);
@@ -233,7 +243,7 @@
       holder.visible = true;
       holder.position.set(cur.x, 0, cur.z);
       holder.scale.setScalar(sizeK);                    // 模型高度归一到 1，这里就是真实高度（米）
-      if (tgt) holder.rotation.y = -Math.atan2(tgt.z - cur.z, tgt.x - cur.x) + Math.PI / 2;
+      if (tgt) holder.rotation.y = Math.atan2(tgt.x - cur.x, tgt.z - cur.z);   // 模型朝向已转成局部 +Z 为前
       ring.position.set(cur.x, 0.002, cur.z);
       ring.visible = true;
     }
