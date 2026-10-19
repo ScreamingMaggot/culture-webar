@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>龙马负图 · 掌心 / 桌面</title>
+  <style>
+    :root {
+      --ink: #0b0f10; --panel: rgba(13,18,19,.82); --line: rgba(255,255,255,.09);
+      --text: #e9ece7; --muted: #98a29b; --jade: #63d8a3; --jade-dim: rgba(99,216,163,.14);
+      --warn: #e8b45a; --bad: #e8695a; --info: #7fb0ff;
+      --radius: 14px; --radius-s: 10px;
+    }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; height: 100%; background: var(--ink); color: var(--text); font-family: system-ui, "Microsoft YaHei", sans-serif; overflow: hidden; }
+    button, select, input { font: inherit; color: inherit; }
+    #v { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; transform: scaleX(-1); }
+    body.table #v { transform: none; }
+    #gl { position: fixed; inset: 0; z-index: 1; width: 100%; height: 100%; }
+
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+            backdrop-filter: blur(14px) saturate(1.1); -webkit-backdrop-filter: blur(14px) saturate(1.1);
+            box-shadow: 0 12px 32px rgba(0,0,0,.35); }
+    .muted { color: var(--muted); }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+            font-size: 12px; letter-spacing: .04em; background: var(--jade-dim); color: var(--jade); border: 1px solid rgba(99,216,163,.25); }
+    .btn { min-height: 40px; padding: 8px 14px; border-radius: var(--radius-s); border: 1px solid var(--line);
+           background: rgba(255,255,255,.04); color: var(--text); font-weight: 600; font-size: 13px; cursor: pointer;
+           transition: background .15s, border-color .15s, transform .06s; }
+    .btn:hover { background: rgba(255,255,255,.08); }
+    .btn:active { transform: translateY(1px); }
+    .btn.primary { background: linear-gradient(180deg, #6fe3ae, #4cc48d); color: #06211a; border-color: transparent; }
+    .btn.ghost { background: transparent; border-color: rgba(255,255,255,.16); color: var(--muted); }
+    .btn.small { min-height: 34px; padding: 6px 10px; font-size: 12px; }
+
+    #hud { position: fixed; top: 12px; left: 12px; right: 12px; z-index: 9; font-size: 13px; line-height: 1.55;
+           color: var(--jade); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--jade);
+           padding: 10px 12px; border-radius: var(--radius-s); backdrop-filter: blur(10px); }
+    #fn { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 10; display: none;
+          max-width: min(92vw, 560px); font-size: 15px; font-weight: 600; line-height: 1.5; text-align: center;
+          color: var(--text); background: var(--panel); border: 1px solid rgba(99,216,163,.35);
+          padding: 12px 18px; border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0,0,0,.45); backdrop-filter: blur(10px); }
+    #bt { position: relative; padding-left: 24px; cursor: pointer; max-width: 46vw; white-space: nowrap;
+          overflow: hidden; text-overflow: ellipsis; }
+    #bt::before { content: ''; position: absolute; left: 10px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px;
+                  border-radius: 50%; background: #6b7470; }
+    #bt.on { color: var(--jade); border-color: rgba(99,216,163,.35); }
+    #bt.on::before { background: var(--jade); box-shadow: 0 0 8px rgba(99,216,163,.8); }
+    #rx { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 10;
+          font: 11.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #a9c7d8;
+          background: rgba(9,13,14,.78); border: 1px solid var(--line); padding: 7px 10px; border-radius: var(--radius-s);
+          text-align: center; cursor: pointer; backdrop-filter: blur(8px); }
+
+    #start { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+             padding: 24px; background:
+               radial-gradient(1200px 600px at 20% -10%, rgba(99,216,163,.10), transparent 60%),
+               radial-gradient(900px 500px at 110% 110%, rgba(127,176,255,.07), transparent 60%),
+               #0a0e0f; overflow: auto; }
+    .landing { width: min(880px, 100%); display: flex; flex-direction: column; gap: 26px; }
+    .brand { display: flex; align-items: center; gap: 16px; }
+    .seal { width: 54px; height: 54px; border-radius: 14px; display: grid; place-items: center;
+            font: 700 17px/1 "STSong", "SimSun", serif; letter-spacing: .12em; color: #0a1712;
+            background: linear-gradient(145deg, #8ce9bf, #4cc48d); box-shadow: 0 8px 24px rgba(76,196,141,.25); }
+    .brand h1 { margin: 0; font: 600 26px/1.2 "STSong", "SimSun", serif; letter-spacing: .06em; }
+    .brand .sub { margin: 6px 0 0; color: var(--muted); font-size: 13px; letter-spacing: .08em; }
+    #ver { font: 11px/1 ui-monospace, Consolas, monospace; color: #7fb0ff; margin-left: 8px; letter-spacing: 0; }
+    .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .mode-card { text-align: left; padding: 18px; border-radius: var(--radius); cursor: pointer;
+                 background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.02));
+                 border: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px;
+                 transition: border-color .18s, background .18s, transform .08s; }
+    .mode-card:hover { border-color: rgba(99,216,163,.42); background: linear-gradient(180deg, rgba(99,216,163,.10), rgba(255,255,255,.02)); }
+    .mode-card:active { transform: translateY(1px); }
+    .mode-card b { font-size: 17px; letter-spacing: .04em; }
+    .mode-card span { color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+    .mode-card svg { width: 26px; height: 26px; color: var(--jade); margin-bottom: 2px; }
+    .setup { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+    .field select, .field input { background: rgba(255,255,255,.05); border: 1px solid var(--line); border-radius: var(--radius-s);
+                                  padding: 10px 12px; color: var(--text); outline: none; min-height: 42px; }
+    .field select:focus, .field input:focus { border-color: rgba(99,216,163,.5); }
+    .actions { display: flex; gap: 10px; align-items: flex-end; }
+    .foot { color: #66706a; font-size: 11.5px; letter-spacing: .14em; text-align: center; }
+    @media (max-width: 620px) {
+      .modes, .setup { grid-template-columns: 1fr; }
+      .brand h1 { font-size: 22px; }
+      .landing { gap: 20px; }
+    }
+
+    #panel { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 9;
+             display: none; padding: 12px 14px; font-size: 12.5px; color: var(--text);
+             background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+             backdrop-filter: blur(14px) saturate(1.1); box-shadow: 0 12px 32px rgba(0,0,0,.35); }
+    .sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-bottom: 10px;
+                  margin-bottom: 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+    .sheet-head .field { flex-direction: row; align-items: center; gap: 8px; }
+    .sheet-head select { min-height: 34px; padding: 4px 10px; }
+    .grid.sliders { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 18px; }
+    .slider { display: grid; grid-template-columns: 54px 1fr 58px; align-items: center; gap: 8px; color: var(--muted); }
+    .slider input[type=range] { width: 100%; accent-color: #63d8a3; }
+    .slider output { font: 12px ui-monospace, Consolas, monospace; color: var(--jade); text-align: right; }
+    .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+    .row-label { color: var(--muted); letter-spacing: .08em; font-size: 11px; text-transform: uppercase; }
+    .cmd { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+    .bcmd { width: 38px; text-align: center; background: rgba(255,255,255,.05); color: var(--jade);
+            border: 1px solid var(--line); border-radius: 8px; font: 12px ui-monospace, Consolas, monospace; padding: 6px; }
+    .bsend { min-height: 34px; background: rgba(99,216,163,.14); border: 1px solid rgba(99,216,163,.35);
+             border-radius: 8px; color: var(--jade); font-size: 12px; font-weight: 600; padding: 5px 10px; cursor: pointer; }
+    .bsend:hover { background: rgba(99,216,163,.22); }
+    .tools .btn { flex: 1 1 auto; }
+    .hintline { color: var(--muted); font-size: 12px; }
+
+    #calib { position: fixed; inset: 0; z-index: 5; touch-action: none; }
+    #calib.hidden { display: none; }
+    .corner { position: absolute; width: 44px; height: 44px; margin: -22px; border-radius: 50%;
+              background: rgba(99,216,163,.16); border: 2px solid var(--jade); cursor: grab;
+              box-shadow: 0 0 0 6px rgba(99,216,163,.08), 0 6px 18px rgba(0,0,0,.35); }
+    .corner::after { content: ''; position: absolute; inset: 15px; border-radius: 50%; background: var(--jade); }
+    #cline { position: absolute; inset: 0; pointer-events: none; }
+    #bar { position: fixed; top: 12px; left: 12px; right: 12px; z-index: 6; display: none;
+           padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+           backdrop-filter: blur(14px); }
+    .bar-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    .bar-fields { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .bar-fields .field { flex-direction: row; align-items: center; gap: 6px; font-size: 12px; }
+    .bar-fields input { width: 62px; }
+    #st { position: fixed; top: 96px; left: 12px; right: 12px; z-index: 6; display: none; text-align: center;
+          font-size: 12.5px; line-height: 1.5; color: var(--jade); background: rgba(9,13,14,.78);
+          border: 1px solid var(--line); padding: 7px 10px; border-radius: var(--radius-s); backdrop-filter: blur(8px); }
+    #st.warn { color: var(--warn); border-color: rgba(232,180,90,.35); }
+
+    #diag { position: fixed; inset: 0; z-index: 30; display: none; overflow: auto; background: rgba(6,9,10,.96);
+            color: #b9e8cf; font: 12px/1.75 ui-monospace, "Cascadia Mono", Consolas, monospace;
+            padding: 20px 18px 48px; white-space: pre-wrap; -webkit-overflow-scrolling: touch; }
+    #diag .warn { color: var(--warn); } #diag .bad { color: var(--bad); } #diag .ok { color: var(--jade); }
+
+    body.table #hud, body.table #fn, body.table #rx, body.table #bt, body.table .palm-only { display: none !important; }
+    body:not(.table) .table-only { display: none !important; }
+    body:not(.table) #calib, body:not(.table) #bar, body:not(.table) #st { display: none !important; }
+    body.table #bar { display: block; }
+    body.table #st { display: block; }
+  </style>
+</head>
+<body>
+  <video id="v" autoplay playsinline muted></video>
+  <canvas id="gl"></canvas>
+
+  <div id="hud">正在加载…</div>
+  <div id="fn"></div>
+  <div id="rx">串口回读：（还没有数据）</div>
+  <div id="diag"></div>
+
+  <div id="start">
+    <div class="landing">
+      <header class="brand">
+        <div class="seal">龍馬</div>
+        <div>
+          <h1>龙马负图<span id="ver"></span></h1>
+          <div class="sub">掌心 · 桌面　两种空间锚定</div>
+        </div>
+      </header>
+
+      <div class="modes">
+        <button id="goPalm" class="mode-card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12"/><path d="M11 11.5V4a1.5 1.5 0 0 1 3 0v7.5"/><path d="M14 11.5V6a1.5 1.5 0 0 1 3 0v8"/><path d="M17 9.5a1.5 1.5 0 0 1 3 0V15a6 6 0 0 1-6 6h-1.5a6 6 0 0 1-4.6-2.1L5 15.5a1.6 1.6 0 0 1 2.4-2.1L8 14"/></svg>
+          <b>掌心模式</b>
+          <span>前置摄像头 · 张掌召出龙马 · 手势触发动作</span>
+        </button>
+        <button id="goTable" class="mode-card">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h18"/><path d="M5 8v11"/><path d="M19 8v11"/><path d="M4 19l4-6"/><path d="M20 19l-4-6"/><path d="M9 13h6"/></svg>
+          <b>桌面模式</b>
+          <span>固定机位 · 四角标定 · 龙马按真实尺寸站在桌上</span>
+        </button>
+      </div>
+
+      <div class="setup">
+        <label class="field"><span>摄像头</span><select id="cam"></select></label>
+        <div class="actions">
+          <button id="goBT" class="btn ghost">连接蓝牙</button>
+          <button id="goDiag" class="btn ghost">蓝牙自检</button>
+        </div>
+      </div>
+
+      <div class="foot">全国仿真创新应用大赛 · 数字文创</div>
+    </div>
+  </div>
+
+  <div id="calib" class="hidden">
+    <svg id="cline"><polygon id="quad" fill="rgba(47,111,237,.12)" stroke="#2f6fed" stroke-width="2" points=""></polygon></svg>
+    <div class="corner" id="c0"></div><div class="corner" id="c1"></div><div class="corner" id="c2"></div><div class="corner" id="c3"></div>
+  </div>
+  <div id="bar">
+    <div class="bar-head">
+      <span class="chip">桌面标定</span>
+      <span id="mode" class="muted">① 拖四角 ② 填宽深 ③ 点标定</span>
+    </div>
+    <div class="bar-fields">
+      <label class="field"><span>宽</span><input id="W" type="number" value="0.6" step="0.1"><span>m</span></label>
+      <label class="field"><span>深</span><input id="D" type="number" value="0.4" step="0.1"><span>m</span></label>
+      <button id="cal" class="btn primary">标定</button>
+      <button id="recal" class="btn small">重标四角</button>
+    </div>
+  </div>
+  <div id="st">模型加载中…</div>
+
+  <div id="panel">
+    <div class="sheet-head">
+      <span class="chip" id="modeChip">掌心</span>
+      <div id="bt" class="chip palm-only" style="background:rgba(255,255,255,.05);border-color:var(--line);color:var(--muted)">蓝牙：未连接</div>
+      <label class="field"><span>模型</span><select id="modelSel"></select></label>
+    </div>
+    <div class="palm-only">
+      <div class="grid sliders">
+        <label class="slider"><span>大小</span><input id="sScale" type="range" min="0.2" max="3" step="0.05" value="1"><output id="oSScale">1.00×</output></label>
+        <label class="slider"><span>转正</span><input id="sYaw" type="range" min="0" max="360" step="15" value="0"><output id="oSYaw">0°</output></label>
+        <label class="slider"><span>俯仰</span><input id="sPitch" type="range" min="-60" max="60" step="5" value="0"><output id="oSPitch">0°</output></label>
+        <label class="slider"><span>掌轴</span><input id="sRoll" type="range" min="0" max="360" step="15" value="270"><output id="oSRoll">270°</output></label>
+      </div>
+      <div class="row" id="cmdrow">
+        <span class="row-label">动作码</span>
+        <label class="cmd">跳舞<input class="bcmd" id="bDance" data-key="dance" maxlength="2" size="2"><button class="bsend" data-key="dance">发送</button></label>
+        <label class="cmd">唱歌<input class="bcmd" id="bSing" data-key="sing" maxlength="2" size="2"><button class="bsend" data-key="sing">发送</button></label>
+        <label class="cmd">科普<input class="bcmd" id="bSci" data-key="science" maxlength="2" size="2"><button class="bsend" data-key="science">发送</button></label>
+      </div>
+      <div class="row tools">
+        <button id="btnFlip" class="btn small">翻转朝向</button>
+        <button id="btnMirror" class="btn small">镜像修正</button>
+        <button id="btnAxes" class="btn small">坐标轴</button>
+        <button id="btnDiag" class="btn small">蓝牙自检</button>
+      </div>
+    </div>
+    <div class="table-only">
+      <div class="grid sliders">
+        <label class="slider"><span>真实高度</span><input id="sSize" type="range" min="0.05" max="0.8" step="0.01" value="0.3"><output id="oSSize">0.30 m</output></label>
+        <label class="slider"><span>速度</span><input id="sSpeed" type="range" min="0.05" max="1.5" step="0.05" value="0.3"><output id="oSSpeed">0.30 m/s</output></label>
+      </div>
+      <div class="row hintline">点桌面置目标点，龙马按真实米制速度走过去</div>
+    </div>
+  </div>
+
+  <script type="importmap">
+  { "imports": {
+    "three": "./samples/three-webxr-hittest/libs/three.module.js",
+    "three/addons/": "./samples/three-webxr-hittest/libs/jsm/"
+  } }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+    import { BleClient, hex } from './ble.js?v=L2026-10-20a';
+    import { RxBridge } from './rxbridge.js?v=L2026-10-20a';
+    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-20a';
+    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-20a';
+    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-20a';
+
+    const VER = 'L2026-10-20a';
+    document.getElementById('ver').textContent = '版本 ' + VER;
+    let MODE = 'palm';                                   // 'palm' | 'table'
+
+    const hud = document.getElementById('hud'), fnEl = document.getElementById('fn');
+    const rxEl = document.getElementById('rx'), btEl = document.getElementById('bt');
+    const diagEl = document.getElementById('diag');
+    const stEl = document.getElementById('st'), modeEl = document.getElementById('mode');
+    const setSt = (t, warn) => { stEl.textContent = t; stEl.classList.toggle('warn', !!warn); };
+    const Wm = () => parseFloat(document.getElementById('W').value);
+    const Dm = () => parseFloat(document.getElementById('D').value);
+
+    // ---------- 摄像头 ----------
+    const AUTO = '__auto__', sel = document.getElementById('cam');
+    const BAD = /privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
+    const scoreFor = (d, mode) => {
+      const l = (d.label || '').toLowerCase();
+      if (BAD.test(l)) return -10;
+      const front = /front|user|face|前置/i.test(l), back = /back|environment|rear|后置|主摄|wide/i.test(l);
+      if (mode === 'palm') return front ? 40 : (back ? 20 : 25);
+      return back ? 40 : (front ? 10 : 25);
+    };
+    async function list() {
+      let d = []; try { d = (await navigator.mediaDevices.enumerateDevices()).filter(x => x.kind === 'videoinput'); } catch (e) {}
+      sel.replaceChildren();
+      const o0 = document.createElement('option'); o0.value = AUTO; o0.textContent = '自动（掌心用前置 / 桌面用后置）'; sel.appendChild(o0);
+      d.sort((a, b) => scoreFor(b, 'palm') - scoreFor(a, 'palm'));
+      d.forEach((x, i) => { const o = document.createElement('option'); o.value = x.deviceId; o.textContent = x.label || ('摄像头' + i); sel.appendChild(o); });
+      if (d[0]) sel.value = d[0].deviceId;
+    }
+    list();
+    let chosenDevice = null;
+    const md = navigator.mediaDevices, origGum = md.getUserMedia.bind(md);
+    md.getUserMedia = function (c) { c = Object.assign({}, c); if (c.video) c.video = (chosenDevice && chosenDevice !== AUTO) ? { deviceId: { exact: chosenDevice } } : true; return origGum(c); };
+
+    // ---------- three.js ----------
+    const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gl'), alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 100);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3));
+    const dl = new THREE.DirectionalLight(0xffffff, 1.2); dl.position.set(0.5, 1, 1); scene.add(dl);
+    function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+    addEventListener('resize', resize); resize();
+
+    // 掌心轴（调试）
+    const axGrp = new THREE.Group(); axGrp.visible = false; scene.add(axGrp);
+    [['#ff5555', [1, 0, 0]], ['#55ff77', [0, 1, 0]], ['#5599ff', [0, 0, 1]]].forEach(([c, d]) => {
+      const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(d[0] * 0.22, d[1] * 0.22, d[2] * 0.22)]);
+      axGrp.add(new THREE.Line(g, new THREE.LineBasicMaterial({ color: c })));
+    });
+    // 桌面定位环
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.055, 0.07, 32),
+      new THREE.MeshBasicMaterial({ color: 0x36d17a, transparent: true, opacity: 0.55, side: THREE.DoubleSide }));
+    ring.rotation.x = -Math.PI / 2; ring.visible = false; scene.add(ring);
+
+    // ---------- 模型 ----------
+    // 掌心：对齐到 a19 轴系（上=+Z、头=-X），按"最大边"归一；
+    // 桌面：统一"上=+Y、头=-X"，按高度归一（holder.scale 即真实米制高度）。
+    const horse = new THREE.Group(); horse.visible = false; scene.add(horse);
+    const draco = new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
+    const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
+    let baseScale = 1, curModelId = 'a19', modelReady = false;
+
+    function loadModel(id) {
+      const preset = MODELS[id] || MODELS.a19;
+      curModelId = id; modelReady = false;
+      while (horse.children.length) {
+        const c = horse.children.pop();
+        c.traverse(o => { if (o.isMesh) { o.geometry && o.geometry.dispose(); for (const m of (Array.isArray(o.material) ? o.material : [o.material])) m && m.dispose && m.dispose(); } });
+        horse.remove(c);
+      }
+      setSt('模型加载中（' + preset.name + '）…', true);
+      hud.textContent = '加载模型：' + preset.name + '…';
+      loader.load(preset.url, g => {
+        const model = g.scene;
+        const cols = (MODE === 'table') ? standColumns(preset) : a19Columns(preset);
+        model.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+          new THREE.Vector3(...cols[0]), new THREE.Vector3(...cols[1]), new THREE.Vector3(...cols[2])));
+        model.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3(); box.getSize(size);
+        const center = new THREE.Vector3(); box.getCenter(center);
+        model.position.set(-center.x, -box.min.y, -center.z);
+        horse.add(model);
+        baseScale = (MODE === 'table') ? (1 / Math.max(size.y, 1e-6)) : (1 / Math.max(size.x, size.y, size.z));
+        modelReady = true;
+        if (MODE === 'table') {
+          setSt('模型已就绪（' + preset.name + '）· 尚未标定 → ① 拖四角 ② 填宽深 ③ 点“标定”', true);
+        } else {
+          hud.textContent = '✅ 模型就绪（' + preset.name + '）：张开五指试试';
+        }
+      }, (p) => { if (p && p.total) { const s = 'loading ' + Math.round(p.loaded / p.total * 100) + '%'; if (MODE === 'palm') hud.textContent = s; } },
+         (e) => {
+           if (MODE === 'table') setSt('模型加载失败：' + ((e && e.message) || e) + '（检查网络后刷新）', true);
+           else hud.textContent = '❌ 模型加载失败: ' + ((e && e.message) || e);
+         });
+    }
+
+    const modelSel = document.getElementById('modelSel');
+    Object.entries(MODELS).forEach(([id, m]) => { const o = document.createElement('option'); o.value = id; o.textContent = m.name; modelSel.appendChild(o); });
+    const savedModel = (() => { try { return localStorage.getItem('longmaModel'); } catch (e) { return null; } })();
+    modelSel.value = MODELS[savedModel] ? savedModel : 'a19';
+    modelSel.addEventListener('change', () => {
+      try { localStorage.setItem('longmaModel', modelSel.value); } catch (e) {}
+      loadModel(modelSel.value);
+    });
+
+    // ================= 掌心模式 =================
+    const sScale = document.getElementById('sScale');
+    const HS_CN = { Right: '右手', Left: '左手' };
+    const ls = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
+    const save = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+    const HS_PAGE = { Right: -HS_DEFAULT.Right, Left: -HS_DEFAULT.Left };   // 真机实测口径：两只手都取反
+    let HS = Object.assign({}, HS_PAGE);
+    for (const k of ['Right', 'Left']) { const v = +ls('hsSign_' + k, HS_PAGE[k]); if (v === 1 || v === -1) HS[k] = v; }
+    let curHand = null, handPresent = false, prevNormal = null;
+    let mirrorOn = ls('mirrorOn', '0') === '1';      // 实测：前置链路不做水平镜像
+    let showAxes = ls('showAxes', '0') === '1';
+    let yawDeg = 0, pitchDeg = 0, rollDeg = 270, moveTarget = null, created = false;
+
+    const btnMirror = document.getElementById('btnMirror'), btnAxes = document.getElementById('btnAxes');
+    const paintBtn = () => { btnMirror.style.opacity = mirrorOn ? 1 : .45; btnAxes.style.opacity = showAxes ? 1 : .45; };
+    paintBtn();
+    btnMirror.addEventListener('click', ev => {
+      ev.stopPropagation();
+      mirrorOn = !mirrorOn; save('mirrorOn', mirrorOn ? '1' : '0'); paintBtn(); prevNormal = null;
+      hud.textContent = '朝向镜像修正：' + (mirrorOn ? '开（跟随镜像后的画面）' : '关（按原始帧）') + ' · 已记住本机选择';
+    });
+    btnAxes.addEventListener('click', ev => { ev.stopPropagation(); showAxes = !showAxes; save('showAxes', showAxes ? '1' : '0'); paintBtn(); });
+    [{ id: 'sYaw', set: v => yawDeg = v }, { id: 'sPitch', set: v => pitchDeg = v }, { id: 'sRoll', set: v => rollDeg = v }].forEach(o => {
+      const el = document.getElementById(o.id);
+      el.value = ls(o.id, el.value); o.set(+el.value);
+      el.addEventListener('input', e => { o.set(+e.target.value); save(o.id, e.target.value); });
+    });
+    sScale.addEventListener('input', e => {});
+    document.getElementById('btnFlip').addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (!curHand) { hud.textContent = '先伸出手掌，让页面认出左手/右手，再点"翻转这只手"'; return; }
+      HS[curHand] = -(HS[curHand] || 1); save('hsSign_' + curHand, HS[curHand]); prevNormal = null;
+      hud.textContent = '已翻转' + HS_CN[curHand] + '的掌心朝向（本机记住）· 再点一次可翻回来';
+    });
+
+    // 手势 → 功能
+    const FN = {
+      'Pointing_Up': { key: 'dance',   name: '跳舞', byte: 0x09 },
+      'Victory':     { key: 'sing',    name: '唱歌', byte: null },
+      'Closed_Fist': { key: 'science', name: '科普', byte: null }
+    };
+    try { Object.values(FN).forEach(f => { const v = localStorage.getItem('fn' + f.key); if (v !== null) f.byte = v === '' ? null : parseInt(v, 16); }); } catch (e) {}
+    let fnHold = 0, fnName = '';
+
+    // 蓝牙
+    const bt = new BleClient((t, ok) => { btEl.textContent = '蓝牙：' + t; btEl.classList.toggle('on', !!ok); });
+    btEl.addEventListener('click', () => bt.connect());
+    document.getElementById('goBT').addEventListener('click', async () => { if (await bt.connect()) document.getElementById('goBT').style.display = 'none'; });
+    window.__bt = () => bt.info(); window.__ble = bt;
+    const bridge = new RxBridge(bytes => { const real = bytes.filter(b => b !== 0xB5); if (real.length) bt.feedExternal(real); });
+    bridge.start(150);
+    window.__bridge = () => bridge.st;
+    let ackToken = 0;
+    async function showFn(fn) {
+      fnEl.style.display = 'block';
+      if (fn.byte == null) { fnEl.textContent = '已触发：' + fn.name + ' · 还没给指令字节（只屏显，不发送）'; return; }
+      const my = ++ackToken;
+      fnEl.textContent = '已触发：' + fn.name + ' · 发出 ' + hex(fn.byte) + ' … 等串口回读';
+      const r = await bt.writeAndAck(fn.byte, 2000);
+      if (my !== ackToken) return;
+      if (!r.sent) { fnEl.textContent = '⚠️ 未发送 ' + hex(fn.byte) + '（' + fn.name + '）· 蓝牙没连上'; return; }
+      if (r.ack == null) {
+        fnEl.textContent = bt.notifyOk
+          ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内没收到回读 → 点下方回读窗看"自检"，能直接分辨是订阅没落到模块、还是系统不投递'
+          : '⚠️ 已发 ' + hex(fn.byte) + '（' + fn.name + '），但这条特征不支持 Notify，读不到回读';
+      } else if (r.match) {
+        fnEl.textContent = '✅ 链路闭环：发出 ' + hex(fn.byte) + ' ＝ 回读 ' + hex(r.ack) + '（' + fn.name + '，经 ' + (r.src || bt.lastSrc || '?') + '）· ' + r.waited + 'ms';
+      } else {
+        fnEl.textContent = '❌ 发出 ' + hex(fn.byte) + '（' + fn.name + '）但串口回读 ' + hex(r.ack) + ' → 不一致';
+      }
+      renderRx();
+    }
+    function renderRx() {
+      const a = bt.rx, n = bt.rxTotal;
+      if (!a.length) { rxEl.textContent = '串口回读：（还没有数据）  点此处＝自检，能看出蓝牙哪一环不通'; return; }
+      rxEl.textContent = '回读 共' + n + '字节 · 来源 ' + (bt.lastSrc || '—') + ' · '
+        + (bridge.st.ok ? '串口桥在线' : '串口桥未启动(仅Notify)') + '：' + a.slice(-14).map(hex).join(' ') + '（点此自检）';
+    }
+    bt.onRx = renderRx;
+
+    // 自检
+    const row = (k, v, cls) => '<span class="' + (cls || '') + '">' + k + '：' + v + '</span>\n';
+    function verdict(d) {
+      const out = [];
+      const push = (cls, t) => out.push('<span class="' + cls + '">· ' + t + '</span>');
+      const nN = bt.srcCount['Notify'] || 0, nB = bt.srcCount['串口桥'] || 0;
+      if (!d['本浏览器支持']) push('bad', '这个浏览器没有 Web Bluetooth（夸克、各类 App 内嵌 WebView 都不行）→ 换 Edge 或 Chrome。');
+      else if (!d['已连接']) push('bad', '还没连上 BT24 → 点右上角"蓝牙"，在弹窗里选 BT24；列表里没有＝模块没在广播或被别的设备连着（BT24 只允许一条连接）。');
+      else if (!d['已订阅Notify']) push('bad', '没订阅上 Notify（特征能力里没有 notify，或系统拒了）→ 只能靠串口桥给判据。');
+      else if (d['CCC(0x2902)'].indexOf('没被打开') >= 0) push('bad', 'CCC 不是 01 → 订阅没落到模块上：手机"设置→应用→Edge→权限→附近的设备/蓝牙"授权后重连。');
+      else if (!nN) push('warn', 'CCC=01（模块端 notify 确实开了），但 Notify 一个字节都没交给浏览器 → 这一侧系统不投递。'
+        + (nB ? '串口桥已补上 ' + nB + ' 字节，判据照样成立（结论里来源显示"串口桥"）。' : '串口桥也没数据：先点自检下面的"桥"看是不是没连上 http 页面/桥没启动。'));
+      else push('ok', 'Notify 正常投递（' + nN + ' 字节）→ 回读走的是空中链路，闭环成立（串口桥另收 ' + nB + ' 字节）。');
+      push('warn', '测手机前：电脑上那个蓝牙页面必须彻底关掉。BT24 一次只允许一条连接，两边抢连会出现"写进去没回读"这种半死状态。');
+      return out.join('\n');
+    }
+    async function runDiag() {
+      diagEl.style.display = 'block';
+      diagEl.textContent = '自检中…（读模块的 CCC 要 1 秒左右）';
+      const d = await bt.diag();
+      let h = row('本页版本', VER + '　' + location.host + location.pathname) + row('UA', navigator.userAgent);
+      h += '\n—— 蓝牙 ——\n';
+      for (const k of Object.keys(d)) h += row(k, d[k]);
+      h += '\n—— 串口桥 ——\n';
+      for (const api of ['/rx.json', 'http://127.0.0.1:8790/rx.json']) {
+        try {
+          const r = await fetch(api, { cache: 'no-store' });
+          const t = await r.json();
+          h += row('桥 ' + api, r.status === 200 && t.ok !== false
+            ? '在线 · 空中到电脑 ' + (t.ble || []).length + ' 字节 · 心跳 ' + (t.hb == null ? '?' : t.hb)
+            : '通了但没连上串口：' + (t.err || '未连'), r.status === 200 && t.ok !== false ? '' : 'warn');
+        } catch (e) { h += row('桥 ' + api, '取不到（' + e.name + '）→ 手机只能靠 Notify', 'warn'); }
+      }
+      diagEl.innerHTML = h + '\n—— 判读 ——\n' + verdict(d) + '\n（点此处关闭）';
+    }
+    diagEl.addEventListener('click', () => { diagEl.style.display = 'none'; });
+    rxEl.addEventListener('click', runDiag);
+    document.getElementById('btnDiag').addEventListener('click', ev => { ev.stopPropagation(); runDiag(); });
+    document.getElementById('goDiag').addEventListener('click', runDiag);
+    window.__diag = runDiag;
+
+    // 指令字节现场可改
+    const FN_BY_KEY = {}; Object.values(FN).forEach(f => { FN_BY_KEY[f.key] = f; });
+    const toHex = b => b.toString(16).toUpperCase().padStart(2, '0');
+    document.querySelectorAll('.bcmd').forEach(inp => {
+      const f = FN_BY_KEY[inp.dataset.key];
+      inp.value = f.byte == null ? '' : toHex(f.byte);
+      inp.addEventListener('change', () => {
+        const h = inp.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 2);
+        if (!h) { f.byte = null; }
+        else {
+          const b = parseInt(h, 16);
+          if (b === 0x71) { btEl.textContent = '蓝牙：0x71 会关掉蓝牙，已拒绝填入'; inp.value = f.byte == null ? '' : toHex(f.byte); return; }
+          f.byte = b;
+        }
+        inp.value = f.byte == null ? '' : toHex(f.byte);
+        try { localStorage.setItem('fn' + f.key, f.byte == null ? '' : toHex(f.byte)); } catch (e) {}
+      });
+    });
+    document.querySelectorAll('.bsend').forEach(btn => { if (btn.dataset.key) btn.addEventListener('click', ev => { ev.stopPropagation(); showFn(FN_BY_KEY[btn.dataset.key]); }); });
+
+    function screenToWorld(nx, ny) {
+      const h = Math.tan(60 / 2 * Math.PI / 180), w = h * camera.aspect;
+      return new THREE.Vector3((nx * 2 - 1) * w, (1 - ny * 2) * h, 0);
+    }
+    const smoothPos = new THREE.Vector3(); let haveSmooth = false;
+
+    async function startPalm(stream) {
+      const video = document.getElementById('v');
+      camera.position.set(0, 0, 1); camera.lookAt(0, 0, 0); camera.fov = 60; camera.updateProjectionMatrix();
+      hud.textContent = '加载手势模型…';
+      const { GestureRecognizer, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
+      const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+      const modelPath = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
+      let gr; try { gr = await GestureRecognizer.createFromOptions(vision, { baseOptions: { modelAssetPath: modelPath, delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 1 }); }
+      catch (e) { gr = await GestureRecognizer.createFromOptions(vision, { baseOptions: { modelAssetPath: modelPath }, runningMode: 'VIDEO', numHands: 1 }); }
+      hud.textContent = '张开五指，让龙马站到掌心';
+      let lastT = -1;
+      (function loop() {
+        requestAnimationFrame(loop);
+        const now = performance.now();
+        if (video.readyState < 2 || video.currentTime === lastT) { renderer.render(scene, camera); return; }
+        lastT = video.currentTime;
+        let res = null; try { res = gr.recognizeForVideo(video, now); } catch (e) {}
+        handPresent = !!(res && res.landmarks && res.landmarks[0]);
+        renderer.render(scene, camera);
+        if (!res || !modelReady) {
+          const gc = res && res.gestures && res.gestures[0] && res.gestures[0][0];
+          hud.textContent = '诊断 res=' + (!!res) + ' 模型=' + (modelReady ? '就绪' : '加载中') + ' 手势=' + (gc ? gc.categoryName : '无') + ' 手=' + (handPresent ? 1 : 0);
+          return;
+        }
+        const hand = res.landmarks && res.landmarks[0];
+        const g = res.gestures && res.gestures[0] && res.gestures[0][0];
+        const cat = g ? g.categoryName : '';
+        const open = cat === 'Open_Palm' && g && g.score > 0.4;
+        const fn = FN[cat];
+        if (fn) { fnHold++; if (fnHold >= 2 && fnName !== fn.name) { fnName = fn.name; showFn(fn); } }
+        else { fnHold = 0; fnName = ''; fnEl.style.display = 'none'; }
+
+        if (open && hand) {
+          axGrp.visible = false;
+          created = true; moveTarget = null;
+          const cx = (hand[0].x + hand[9].x) / 2, cy = (hand[0].y + hand[9].y) / 2;
+          const palm = Math.hypot(hand[9].x - hand[0].x, hand[9].y - hand[0].y);
+          const wp = screenToWorld(1 - cx, cy);
+          if (!haveSmooth) { smoothPos.copy(wp); haveSmooth = true; } else smoothPos.lerp(wp, 0.5);
+          const scale = baseScale * palm * 1.4;
+          if (Number.isFinite(scale) && scale > 1e-6) horse.scale.setScalar(scale * (+sScale.value));
+          horse.position.copy(smoothPos);
+          const wl = (res.worldLandmarks && res.worldLandmarks[0]) || hand;
+          const hn = (res.handednesses && res.handednesses[0] && res.handednesses[0][0] && res.handednesses[0][0].categoryName)
+                  || (res.handedness && res.handedness[0] && res.handedness[0][0] && res.handedness[0][0].categoryName) || null;
+          if (hn) curHand = hn;
+          const f = palmBasis(mirrorOn ? toDisplay(wl) : wl, hn, HS, prevNormal);
+          if (f) {
+            prevNormal = f.n;
+            const V = a => new THREE.Vector3(a[0], a[1], a[2]);
+            const qb = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(V(f.x), V(f.y), V(f.z)));
+            const q = qb.clone();
+            const off = new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(rollDeg), THREE.MathUtils.degToRad(yawDeg), THREE.MathUtils.degToRad(pitchDeg)));
+            q.multiply(off);
+            if (Number.isFinite(q.x) && Number.isFinite(q.y) && Number.isFinite(q.z) && Number.isFinite(q.w)) horse.quaternion.slerp(q, 0.6);
+            axGrp.position.copy(horse.position); axGrp.quaternion.copy(qb); axGrp.visible = showAxes;
+          }
+          horse.visible = true;
+          hud.textContent = '① 手掌跟随 · 手势 ' + cat + ' (' + Math.round((g.score || 0) * 100) + '%) · ' + (HS_CN[curHand] || '手别未识别') + ' · 镜像' + (mirrorOn ? '开' : '关');
+        } else if (created) {
+          if (moveTarget) smoothPos.lerp(moveTarget, 0.35);
+          horse.position.copy(smoothPos); horse.visible = true;
+          if (moveTarget) {
+            const tv = new THREE.Vector3().subVectors(moveTarget, smoothPos);
+            if (tv.length() > 0.02) {
+              tv.y = 0; tv.normalize();
+              const Xw = tv.clone().negate(), Yw = new THREE.Vector3(0, 1, 0), Zw = new THREE.Vector3().crossVectors(Xw, Yw).normalize();
+              horse.quaternion.slerp(new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(Xw, Yw, Zw)), 0.3);
+            }
+          }
+          hud.textContent = fn ? ('③ 已触发 «' + fn.name + '» ' + (fn.byte != null ? hex(fn.byte) : '字节待确认') + '（不跟随）')
+                              : (cat ? ('手势 ' + cat + '（不跟随）· 可点屏幕移动') : '② 手不在画面里 · 龙马停在原地，先伸出手掌再点屏幕');
+        } else {
+          horse.visible = false;
+          hud.textContent = cat ? ('手势 ' + cat + ' — 张开手掌召出龙马') : '张开手掌，让龙马出现';
+        }
+      })();
+    }
+
+    // ================= 桌面模式（四角标定 + 透视相机） =================
+    let H = null, Hinv = null, pose = null, cur = { x: 0, z: 0 }, tgt = null;
+    let tableSpeed = 0.3, tableSize = 0.3;
+    document.getElementById('sSpeed').addEventListener('input', e => tableSpeed = +e.target.value);
+    document.getElementById('sSize').addEventListener('input', e => tableSize = +e.target.value);
+
+    let corners = [[0.2, 0.35], [0.8, 0.35], [0.85, 0.8], [0.15, 0.8]], drag = -1;
+    function renderCorners() {
+      const W = innerWidth, Hh = innerHeight, px = corners.map(c => [c[0] * W, c[1] * Hh]);
+      document.getElementById('quad').setAttribute('points', px.map(p => p.join(',')).join(' '));
+      px.forEach((p, i) => { const e = document.getElementById('c' + i); e.style.left = p[0] + 'px'; e.style.top = p[1] + 'px'; });
+    }
+    function resetCorners() { corners = [[0.2, 0.35], [0.8, 0.35], [0.85, 0.8], [0.15, 0.8]]; renderCorners(); }
+    const calib = document.getElementById('calib');
+    calib.addEventListener('pointerdown', e => { const id = e.target.id; if (id && id[0] === 'c') drag = +id[1]; });
+    window.addEventListener('pointermove', e => { if (drag < 0) return; corners[drag] = [e.clientX / innerWidth, e.clientY / innerHeight]; renderCorners(); });
+    window.addEventListener('pointerup', () => drag = -1);
+    window.addEventListener('resize', renderCorners);
+    document.getElementById('recal').addEventListener('click', () => {
+      calib.classList.remove('hidden');
+      H = null; pose = null; horse.visible = false; ring.visible = false;
+      modeEl.textContent = '① 拖四角 ② 填宽深 ③ 点标定';
+      setSt('未标定 · 龙马暂不显示', true); resetCorners();
+    });
+
+    function applyPose(p) {
+      const m = new THREE.Matrix4().set(
+        p.R[0], p.R[1], p.R[2], 0,
+        p.R[3], p.R[4], p.R[5], 0,
+        p.R[6], p.R[7], p.R[8], 0,
+        0, 0, 0, 1);
+      m.transpose().multiply(new THREE.Matrix4().makeScale(1, -1, -1));
+      camera.quaternion.setFromRotationMatrix(m);
+      camera.position.set(p.C[0], p.C[1], p.C[2]);
+      camera.fov = 2 * Math.atan((innerHeight / 2) / p.f) * 180 / Math.PI;
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+    }
+    function reprojectErrorPx() {
+      let worst = 0;
+      rectCorners(Wm(), Dm()).forEach((p, i) => {
+        const v = new THREE.Vector3(p[0], p[1], p[2]).project(camera);
+        const u = (v.x * 0.5 + 0.5) * innerWidth, vv = (-v.y * 0.5 + 0.5) * innerHeight;
+        worst = Math.max(worst, Math.hypot(u - corners[i][0] * innerWidth, vv - corners[i][1] * innerHeight));
+      });
+      return worst;
+    }
+    document.getElementById('cal').addEventListener('click', () => {
+      const w = Wm(), d = Dm();
+      if (!(w > 0 && d > 0)) { alert('填有效的宽/深（米）'); return; }
+      const src = rectCorners(w, d).map(p => [p[0], p[2]]);
+      const dst = corners.map(c => [c[0] * innerWidth, c[1] * innerHeight]);
+      const h = homography(src, dst);
+      if (!h) { alert('四点退化（共线或重合），请重拖'); return; }
+      const p = poseFromHomography(h, innerWidth, innerHeight, 60);
+      if (!p.ok) { alert('标定失败：' + (p.why || '位姿解不出')); return; }
+      H = h; Hinv = inv3(h); pose = p;
+      cur = { x: 0, z: 0 }; tgt = null;
+      calib.classList.add('hidden');
+      document.getElementById('panel').style.display = 'block';
+      modeEl.textContent = '已标定';
+      applyPose(p);
+      const err = reprojectErrorPx();
+      const cc = new THREE.Vector3(0, 0, 0).project(camera);
+      const cu = (cc.x * 0.5 + 0.5) * innerWidth, cv = (-cc.y * 0.5 + 0.5) * innerHeight;
+      const onScreen = cu > 0 && cu < innerWidth && cv > 0 && cv < innerHeight;
+      if (p.approx) setSt('已标定（近似）· 四点不像同一矩形的透视，视场按默认值；若透视不对请重拖四角', true);
+      else setSt('已标定 · 四角复投误差 ' + err.toFixed(2) + ' 像素 · 模型中心屏位 (' + Math.round(cu) + ',' + Math.round(cv) + ')'
+        + (onScreen ? '' : ' ⚠ 不在画面内，请重标') + ' · 点桌面让龙马走', err > 3 || !onScreen);
+    });
+
+    function startTable() {
+      document.getElementById('panel').style.display = 'block';
+      calib.classList.remove('hidden');
+      modeEl.textContent = '① 拖四角 ② 填宽深 ③ 点标定';
+      resetCorners();
+      setSt('模型已就绪 · 尚未标定 → ① 拖四角 ② 填宽深 ③ 点“标定”', true);
+      let last = 0;
+      (function loop(ts) {
+        requestAnimationFrame(loop);
+        const dt = last ? Math.min((ts - last) / 1000, 0.05) : 0; last = ts;
+        if (tgt && H) {
+          const dx = tgt.x - cur.x, dz = tgt.z - cur.z, dist = Math.hypot(dx, dz);
+          if (dist < 0.005) { tgt = null; }
+          else { const st = Math.min(tableSpeed * dt, dist) / dist; cur.x += dx * st; cur.z += dz * st; }
+        }
+        if (H && modelReady) {
+          horse.visible = true;
+          horse.position.set(cur.x, 0, cur.z);
+          horse.scale.setScalar(tableSize * baseScale);   // 子模型是原始尺寸，baseScale=1/模型高
+          if (tgt) horse.rotation.y = Math.atan2(tgt.z - cur.z, -(tgt.x - cur.x));   // 头=局部 -X
+          ring.position.set(cur.x, 0.002, cur.z); ring.visible = true;
+        }
+        renderer.render(scene, camera);
+      })(0);
+    }
+
+    // ---------- 点击：掌心（有限制）/ 桌面（逆单应） ----------
+    window.addEventListener('pointerdown', ev => {
+      if (ev.target && ev.target.closest && ev.target.closest('#panel,#hud,#start,#bt,#rx,#diag,#bar,#calib')) return;
+      if (MODE === 'palm') {
+        if (!handPresent) { hud.textContent = '画面里还没有手 · 先张开手掌把龙马召出来，再点屏幕让它走'; return; }
+        const r = renderer.domElement.getBoundingClientRect();
+        const nx = (ev.clientX - r.left) / r.width, ny = (ev.clientY - r.top) / r.height;
+        moveTarget = screenToWorld(nx, ny);
+        hud.textContent = '已设目标点 (' + nx.toFixed(2) + ',' + ny.toFixed(2) + ')，龙马走过去…';
+      } else {
+        if (!H || !Hinv) return;
+        const [x, z] = applyH(Hinv, ev.clientX, ev.clientY);
+        if (Number.isFinite(x) && Number.isFinite(z)) tgt = { x, z };
+      }
+    });
+
+    // ---------- 启动 ----------
+    async function start(mode, btn) {
+      MODE = mode;
+      document.body.classList.toggle('table', mode === 'table');
+      const mc = document.getElementById('modeChip'); if (mc) mc.textContent = (mode === 'table') ? '桌面' : '掌心';
+      // 自动选摄像头：掌心用前置、桌面用后置；用户手动选过则尊重
+      if (sel.value === AUTO || !sel.value) {
+        try {
+          const d = (await navigator.mediaDevices.enumerateDevices()).filter(x => x.kind === 'videoinput');
+          d.sort((a, b) => scoreFor(b, mode) - scoreFor(a, mode));
+          if (d[0]) sel.value = d[0].deviceId;
+        } catch (e) {}
+      }
+      chosenDevice = sel.value;
+      let stream;
+      try { stream = await md.getUserMedia({ video: true }); }
+      catch (e) { alert('摄像头失败 ' + e.name); MODE = 'palm'; document.body.classList.remove('table'); return; }
+      const video = document.getElementById('v'); video.srcObject = stream; await video.play().catch(() => {});
+      document.getElementById('start').style.display = 'none';
+      document.getElementById('panel').style.display = 'block';
+      layoutOverlays();
+      loadModel(modelSel.value);
+      if (mode === 'palm') { await startPalm(stream); }
+      else { startTable(); }
+    }
+    document.getElementById('goPalm').addEventListener('click', ev => start('palm', ev.target));
+    document.getElementById('goTable').addEventListener('click', ev => start('table', ev.target));
+
+    // 底部面板高度不定：回读窗与提示条跟着上移，避免互相压住
+    function layoutOverlays() {
+      const p = document.getElementById('panel');
+      const base = (p && getComputedStyle(p).display !== 'none') ? p.offsetHeight + 24 : 12;
+      rxEl.style.bottom = base + 'px';
+      fnEl.style.bottom = (base + 14) + 'px';
+    }
+    addEventListener('resize', layoutOverlays);
+    layoutOverlays();
+
+    const bindOut = (id, out, fmt) => {
+      const el = document.getElementById(id), o = document.getElementById(out);
+      const f = () => { if (o) o.textContent = fmt(+el.value); };
+      el.addEventListener('input', f); f();
+    };
+    bindOut('sScale', 'oSScale', v => v.toFixed(2) + '×');
+    bindOut('sYaw', 'oSYaw', v => v + '°');
+    bindOut('sPitch', 'oSPitch', v => v + '°');
+    bindOut('sRoll', 'oSRoll', v => v + '°');
+    bindOut('sSize', 'oSSize', v => v.toFixed(2) + ' m');
+    bindOut('sSpeed', 'oSSpeed', v => v.toFixed(2) + ' m/s');
+
+    window.__loadModel = loadModel;
+    window.__setMode = m => { MODE = m; document.body.classList.toggle('table', m === 'table'); };   // 离线自检用
+    window.__model = () => ({
+      mode: MODE, id: curModelId, ready: modelReady,
+      bbox: horse.children.length ? (() => { const b = new THREE.Box3().setFromObject(horse); const v = new THREE.Vector3(); b.getSize(v); return v.toArray().map(x => +x.toFixed(3)); })() : null
+    });
+  </script>
+</body>
+</html>

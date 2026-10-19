@@ -17,7 +17,7 @@ const px=corners.map(p=>{const d=sub(p,cam.C);const xc=[dot(cam.R.slice(0,3),d),
 const H=homography(corners.map(p=>[p[0],p[2]]),px);
 const pose=poseFromHomography(H,Wimg,Himg,60);
 
-// 与 ar-table.html 的 applyPose 完全一致
+// 与 ar-longma.html（桌面模式）的 applyPose 完全一致
 const camera=new THREE.PerspectiveCamera(60,Wimg/Himg,0.01,100);
 const m=new THREE.Matrix4().set(pose.R[0],pose.R[1],pose.R[2],0, pose.R[3],pose.R[4],pose.R[5],0, pose.R[6],pose.R[7],pose.R[8],0, 0,0,0,1);
 m.transpose().multiply(new THREE.Matrix4().makeScale(1,-1,-1));
