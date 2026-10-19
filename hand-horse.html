@@ -53,6 +53,7 @@
     转正 <input id="sYaw" type="range" min="0" max="360" step="15" value="0">
     俯仰° <input id="sPitch" type="range" min="-60" max="60" step="5" value="0">
     掌轴° <input id="sRoll" type="range" min="0" max="360" step="15" value="270">
+    <label>模型 <select id="modelPalm" style="background:#22252b;color:#eee;border:1px solid #444;border-radius:6px;padding:2px"></select></label>
     <div id="cmdrow">
       指令字节(十六进制，空＝只屏显不发)：
       跳舞 <input class="bcmd" id="bDance" data-key="dance" maxlength="2" size="2"><button class="bsend" data-key="dance">发</button>
@@ -77,9 +78,10 @@
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     // 导入带 ?v=：GitHub Pages 对 .js 有缓存，手机改了 ble.js 却仍在跑旧的那份时会看不出差别
-    import { BleClient, hex } from './ble.js?v=H2026-10-19f';
-    import { RxBridge } from './rxbridge.js?v=H2026-10-19f';
-    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=H2026-10-19f';
+    import { BleClient, hex } from './ble.js?v=H2026-10-19k';
+    import { RxBridge } from './rxbridge.js?v=H2026-10-19k';
+    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=H2026-10-19k';
+    import { MODELS, a19Columns } from './models.js?v=H2026-10-19k';
 
     const AUTO='__auto__', sel=document.getElementById('cam');
     const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
@@ -91,7 +93,7 @@
     list();
 
     const hud=document.getElementById('hud');
-    const VER='H2026-10-19f';   // 页面版本：出问题时先确认不是旧缓存
+    const VER='H2026-10-19k';   // 页面版本：出问题时先确认不是旧缓存
     document.getElementById('ver').textContent='版本 '+VER;
     const video=document.getElementById('v');
     const canvas=document.getElementById('gl');
@@ -119,7 +121,7 @@
     function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
     addEventListener('resize', resize); resize();
 
-    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, rollDeg=270, prevNormal=null, moveTarget=null, created=false;
+    let baseScale=1, yawDeg=0, pitchDeg=0, rollDeg=270, prevNormal=null, moveTarget=null, created=false;
 
     // ---- 手势 → 龙马功能。固件表(talk.c deal())只有 0x09=跳舞；唱歌/科普的字节由王子涵定，
     //      未填则只屏显不发送。三个字节都可在下方"指令字节"框现场改（存 localStorage，免重新部署）。
@@ -242,48 +244,49 @@
     const draco=new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader=new GLTFLoader(); loader.setDRACOLoader(draco);
     window.__loadState='pending';
-    loader.load('./assets/a19.min.glb', g => {
-      const model=g.scene;
-      const box=new THREE.Box3().setFromObject(model);
-      const size=new THREE.Vector3(); box.getSize(size);
-      const center=new THREE.Vector3(); box.getCenter(center);
-      model.position.set(-center.x, -box.min.y, -center.z);
-      horse=new THREE.Group(); horse.add(model); horse.visible=false; scene.add(horse);
-      baseScale=1/Math.max(size.x,size.y,size.z);
-      window.__loadState='ok';
-      hud.textContent='✅ 模型就绪：张开五指试试';
-    }, (p)=>{ if(p&&p.total) window.__loadState='loading '+Math.round(p.loaded/p.total*100)+'%'; },
-       (e)=>{ window.__loadState='err:'+((e&&e.message)||e); hud.textContent='❌ 模型加载失败: '+((e&&e.message)||e); });
+    // 模型：各模型本地轴不同，先对齐到 a19 的轴系（上=+Z、头=-X），掌心的调参才对所有模型成立
+    const horse = new THREE.Group(); horse.visible = false; scene.add(horse);
+    function loadHorse(id) {
+      const preset = MODELS[id] || MODELS.a19;
+      while (horse.children.length) {
+        const c = horse.children.pop();
+        c.traverse(o => { if (o.isMesh) { o.geometry && o.geometry.dispose(); for (const m of (Array.isArray(o.material) ? o.material : [o.material])) m && m.dispose && m.dispose(); } });
+        horse.remove(c);
+      }
+      prevNormal = null; created = false; moveTarget = null;
+      window.__loadState = 'loading';
+      hud.textContent = '加载模型：' + preset.name + '…';
+      loader.load(preset.url, g => {
+        const model = g.scene;
+        const [cx, cy, cz] = a19Columns(preset);
+        model.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
+          new THREE.Vector3(...cx), new THREE.Vector3(...cy), new THREE.Vector3(...cz)));
+        model.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(model);
+        const size = new THREE.Vector3(); box.getSize(size);
+        const center = new THREE.Vector3(); box.getCenter(center);
+        model.position.set(-center.x, -box.min.y, -center.z);
+        horse.add(model);
+        baseScale = 1 / Math.max(size.x, size.y, size.z);
+        window.__loadState = 'ok';
+        hud.textContent = '✅ 模型就绪（' + preset.name + '）：张开五指试试';
+      }, (p) => { if (p && p.total) window.__loadState = 'loading ' + Math.round(p.loaded / p.total * 100) + '%'; },
+         (e) => { window.__loadState = 'err:' + ((e && e.message) || e); hud.textContent = '❌ 模型加载失败: ' + ((e && e.message) || e); });
+    }
 
-    // ---- 朝向的三个可调量：滑动条改完记在本机（换人/换镜头不必重部署）；"翻转这只手"只改当前这只手的符号常数
-    const HS_CN = { Right: '右手', Left: '左手' };
-    const ls = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
-    const save = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
-    // 实测口径（2026-10-19，真机确认）：MediaPipe 世界坐标无需再做水平镜像；左右手标签与坐标口径相反，
-    // 所以每只手的符号常数取反。两者都可在页面上切换并记住本机值。
-    const HS_PAGE = { Right: -HS_DEFAULT.Right, Left: -HS_DEFAULT.Left };
-    let HS = Object.assign({}, HS_PAGE);
-    for (const k of ['Right', 'Left']) { const v = +ls('hsSign_' + k, HS_PAGE[k]); if (v === 1 || v === -1) HS[k] = v; }
-    let curHand = null, handPresent = false;   // prevNormal 在上方与姿态量一起声明
-    let mirrorOn = ls('mirrorOn', '0') === '1';   // 朝向是否按"显示所见"做水平镜像（默认关，实测为准）
-    let showAxes = ls('showAxes', '0') === '1';   // 掌轴三色线：红x 绿y 蓝z，用来肉眼核对"手往哪转、轴往哪转"
-    const btnMirror = document.getElementById('btnMirror'), btnAxes = document.getElementById('btnAxes');
-    const paintBtn = () => { btnMirror.style.opacity = mirrorOn ? 1 : .45; btnAxes.style.opacity = showAxes ? 1 : .45; };
-    paintBtn();
-    btnMirror.addEventListener('click', ev => {
-      ev.stopPropagation();
-      mirrorOn = !mirrorOn; save('mirrorOn', mirrorOn ? '1' : '0'); paintBtn(); prevNormal = null;
-      hud.textContent = '朝向镜像修正：' + (mirrorOn ? '开（跟随镜像后的画面）' : '关（按原始帧）') + ' · 已记住本机选择';
+    const modelSel = document.getElementById('modelPalm');
+    Object.entries(MODELS).forEach(([id, m]) => {
+      const o = document.createElement('option'); o.value = id; o.textContent = m.name; modelSel.appendChild(o);
     });
-    btnAxes.addEventListener('click', ev => {
-      ev.stopPropagation(); showAxes = !showAxes; save('showAxes', showAxes ? '1' : '0'); paintBtn();
+    const savedHorseModel = (() => { try { return localStorage.getItem('palmModel'); } catch (e) { return null; } })();
+    modelSel.value = MODELS[savedHorseModel] ? savedHorseModel : 'a19';
+    modelSel.addEventListener('change', () => {
+      try { localStorage.setItem('palmModel', modelSel.value); } catch (e) {}
+      loadHorse(modelSel.value);
     });
-    const sl = [{ id: 'sYaw', set: v => yawDeg = v }, { id: 'sPitch', set: v => pitchDeg = v }, { id: 'sRoll', set: v => rollDeg = v }];
-    sl.forEach(o => {
-      const el = document.getElementById(o.id);
-      el.value = ls(o.id, el.value); o.set(+el.value);
-      el.addEventListener('input', e => { o.set(+e.target.value); save(o.id, e.target.value); });
-    });
+    loadHorse(modelSel.value);
+    window.__model = () => ({ id: modelSel.value, children: horse.children.length, state: window.__loadState });
+
     document.getElementById('sScale').addEventListener('input', e => {});
     const btnFlip = document.getElementById('btnFlip');
     btnFlip.addEventListener('click', ev => {

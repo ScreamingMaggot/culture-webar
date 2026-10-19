@@ -36,7 +36,8 @@
 
   <div id="tip">扫描中…请把龙马识别卡对准摄像头</div>
   <div id="panel">
-    缩放 <input id="sScale" type="range" min="0.02" max="0.2" step="0.005" value="0.06">
+    模型 <select id="sModel"></select>
+    缩放× <input id="sScale" type="range" min="0.3" max="3" step="0.05" value="1">
     速度 <input id="sSpeed" type="range" min="0.1" max="2" step="0.05" value="0.8">
     朝向偏移° <input id="sHead" type="range" min="0" max="360" step="15" value="0">
   </div>
@@ -119,7 +120,31 @@
       document.getElementById('panel').style.display='block';
       wireHorse(); // 先注册组件，再注入场景
       // 稍等，确保摄像头释放后再交给 MindAR
-      setTimeout(()=>{ document.body.appendChild(document.getElementById('tpl').content.cloneNode(true)); }, 400);
+      setTimeout(()=>{ document.body.appendChild(document.getElementById('tpl').content.cloneNode(true)); wireModel(); }, 400);
+    }
+
+    // ---------- 模型切换：统一成"头=-X、上=+Y、底面 y=0" ----------
+    const MODEL_PRESETS = {
+      a19:    { name: '龙马 A19（当前）', url: './assets/a19.min.glb',    rx: -90, scale: 0.060 },
+      a30:    { name: '龙马 A30',        url: './assets/a30.min.glb',    rx: -90, scale: 0.064 },
+      longma: { name: '龙马 Longma',     url: './assets/longma.min.glb', rx: 0,   scale: 0.624 }
+    };
+    function wireModel(){
+      const sel=document.getElementById('sModel'); if(!sel) return;
+      Object.entries(MODEL_PRESETS).forEach(([id,m])=>{const o=document.createElement('option');o.value=id;o.textContent=m.name;sel.appendChild(o);});
+      let saved=null; try{saved=localStorage.getItem('cardModel');}catch(e){}
+      sel.value=MODEL_PRESETS[saved]?saved:'a19';
+      const apply=()=>{
+        const el=document.querySelector('#horse'); if(!el) return;
+        const p=MODEL_PRESETS[sel.value];
+        el.setAttribute('gltf-model',p.url);
+        el.setAttribute('rotation',p.rx+' 0 0');
+        el.setAttribute('scale',`${p.scale} ${p.scale} ${p.scale}`);
+        const comp=el.components['horse-nav'];
+        if(comp){comp.baseScale=p.scale; const s=p.scale*(comp.mult||1); el.object3D.scale.set(s,s,s);}
+      };
+      sel.addEventListener('change',()=>{try{localStorage.setItem('cardModel',sel.value);}catch(e){} apply();});
+      apply();
     }
 
     // ---------- 龙马点击位移（MindAR 版）----------
@@ -129,6 +154,7 @@
         AFRAME.registerComponent('horse-nav',{
           init:function(){
             this.tp=new THREE.Vector3(); this.cur=new THREE.Vector3(); this.has=false; this.speed=0.8; this.head=0;
+            this.baseScale=0.06; this.mult=1;
             this.ray=new THREE.Raycaster();
             const scene=this.el.sceneEl;
             this.target=document.querySelector('#target'); this.hit=document.getElementById('hitplane');
@@ -137,7 +163,7 @@
               this.target.addEventListener('targetFound',()=>{ tip.textContent='✅ 已识别！点桌面任意处，龙马会走过去'; });
               this.target.addEventListener('targetLost',()=>{ tip.textContent='识别卡移出画面了，重新对准'; });
             }
-            document.getElementById('sScale').addEventListener('input',e=>{const s=+e.target.value; this.el.object3D.scale.set(s,s,s);});
+            document.getElementById('sScale').addEventListener('input',e=>{this.mult=+e.target.value; const s=this.baseScale*this.mult; this.el.object3D.scale.set(s,s,s);});
             document.getElementById('sSpeed').addEventListener('input',e=>{this.speed=+e.target.value;});
             document.getElementById('sHead').addEventListener('input',e=>{this.head=(+e.target.value)*Math.PI/180;});
             window.addEventListener('pointerdown',(ev)=>{ const cv=scene.canvas; if(cv&&ev.target===cv) this.tap(ev); });
