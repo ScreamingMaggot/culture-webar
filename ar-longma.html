@@ -109,6 +109,10 @@
     .bsend:hover { background: rgba(99,216,163,.22); }
     .tools .btn { flex: 1 1 auto; }
     .hintline { color: var(--muted); font-size: 12px; }
+    #panel.collapsed { padding-bottom: 10px; }
+    #panel.collapsed #sheetBody { display: none; }
+    #panel.collapsed .sheet-head { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
+    #collapse { min-width: 64px; }
 
     #calib { position: fixed; inset: 0; z-index: 5; touch-action: none; }
     #calib.hidden { display: none; }
@@ -208,7 +212,9 @@
       <span class="chip" id="modeChip">掌心</span>
       <div id="bt" class="chip palm-only" style="background:rgba(255,255,255,.05);border-color:var(--line);color:var(--muted)">蓝牙：未连接</div>
       <label class="field"><span>模型</span><select id="modelSel"></select></label>
+      <button id="collapse" class="btn small" aria-expanded="true">收起</button>
     </div>
+    <div id="sheetBody">
     <div class="palm-only">
       <div class="grid sliders">
         <label class="slider"><span>大小</span><input id="sScale" type="range" min="0.2" max="3" step="0.05" value="1"><output id="oSScale">1.00×</output></label>
@@ -235,6 +241,7 @@
         <label class="slider"><span>速度</span><input id="sSpeed" type="range" min="0.05" max="1.5" step="0.05" value="0.3"><output id="oSSpeed">0.30 m/s</output></label>
       </div>
       <div class="row hintline">点桌面置目标点，龙马按真实米制速度走过去</div>
+    </div>
     </div>
   </div>
 
@@ -340,7 +347,35 @@
         const center = new THREE.Vector3(); box.getCenter(center);
         model.position.set(-center.x, -box.min.y, -center.z);
         horse.add(model);
-        baseScale = (MODE === 'table') ? (1 / Math.max(size.y, 1e-6)) : (1 / Math.max(size.x, size.y, size.z));
+        model.updateMatrixWorld(true);
+        // 有些导出模型底部带"塌缩到一点"的残留网格（longma 有一簇贴在 (−0.8,−1.2,0)），
+        // 它会把包围盒底面拉到蹄子下方，看起来就是四足悬浮。隐藏这类退化网格后再求可见包围盒。
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const tmpB = new THREE.Box3(), tmpS = new THREE.Vector3();
+        let hidden = 0;
+        model.traverse(o => {
+          if (!(o.isMesh && o.geometry && o.geometry.attributes.position)) return;
+          o.geometry.computeBoundingBox();
+          if (!o.geometry.boundingBox) return;
+          tmpB.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld);
+          tmpB.getSize(tmpS);
+          if (Math.max(tmpS.x, tmpS.y, tmpS.z) < 0.03 * maxDim && tmpB.min.y < box.min.y + 0.10 * size.y) { o.visible = false; hidden++; }
+        });
+        const vb = new THREE.Box3();
+        model.traverse(o => {
+          if (!(o.isMesh && o.visible && o.geometry && o.geometry.attributes.position)) return;
+          o.geometry.computeBoundingBox();
+          const b = o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld);
+          vb.union(b);
+        });
+        if (!vb.isEmpty()) {
+          const vc = new THREE.Vector3(); vb.getCenter(vc);
+          model.position.x -= vc.x; model.position.z -= vc.z; model.position.y -= vb.min.y;
+          model.updateMatrixWorld(true);
+        }
+        const visH = vb.isEmpty() ? Math.max(size.y, 1e-6) : Math.max(vb.max.y - vb.min.y, 1e-6);
+        baseScale = (MODE === 'table') ? (1 / visH) : (1 / maxDim);
+        window.__modelInfo = { hidden, visH: +visH.toFixed(2), baseScale: +baseScale.toFixed(4) };
         modelReady = true;
         if (MODE === 'table') {
           setSt('模型已就绪（' + preset.name + '）· 尚未标定 → ① 拖四角 ② 填宽深 ③ 点“标定”', true);
@@ -708,6 +743,7 @@
     async function start(mode, btn) {
       MODE = mode;
       document.body.classList.toggle('table', mode === 'table');
+      setCollapsed(ls('panelCollapsed_' + mode, '1') === '1');
       layoutOverlays();
       const mc = document.getElementById('modeChip'); if (mc) mc.textContent = (mode === 'table') ? '桌面' : '掌心';
       // 自动选摄像头：掌心用前置、桌面用后置；用户手动选过则尊重
@@ -757,11 +793,47 @@
     bindOut('sSize', 'oSSize', v => v.toFixed(2) + ' m');
     bindOut('sSpeed', 'oSSpeed', v => v.toFixed(2) + ' m/s');
 
+    // 面板收起/展开（按模式记住；默认收起，让画面干净）
+    const panelEl = document.getElementById('panel'), collapseBtn = document.getElementById('collapse');
+    function setCollapsed(c) {
+      panelEl.classList.toggle('collapsed', !!c);
+      collapseBtn.textContent = c ? '展开' : '收起';
+      collapseBtn.setAttribute('aria-expanded', c ? 'false' : 'true');
+      try { localStorage.setItem('panelCollapsed_' + MODE, c ? '1' : '0'); } catch (e) {}
+      layoutOverlays();
+    }
+    collapseBtn.addEventListener('click', ev => { ev.stopPropagation(); setCollapsed(!panelEl.classList.contains('collapsed')); });
+    const savedCollapsed = ls('panelCollapsed_palm', '1') === '1';
+    setCollapsed(savedCollapsed);
+
+    // 设计预览：?ui=palm / ?ui=table 直接展开面板（不开摄像头，便于评审视觉与截图）
+    {
+      const uiPrev = new URLSearchParams(location.search).get('ui');
+      if (uiPrev === 'palm' || uiPrev === 'table') {
+        MODE = uiPrev;
+        document.body.classList.toggle('table', MODE === 'table');
+        document.getElementById('start').style.display = 'none';
+        panelEl.style.display = 'block';
+        document.getElementById('modeChip').textContent = (MODE === 'table') ? '桌面' : '掌心';
+        loadModel(modelSel.value);
+        setCollapsed(false);
+        if (MODE === 'table') {
+          setSt('模型已就绪 · 尚未标定 → ① 拖四角 ② 填宽深 ③ 点“标定”', true);
+          document.getElementById('mode').textContent = '① 拖四角 ② 填宽深 ③ 点标定';
+        } else {
+          hud.textContent = '张开五指，让龙马站到掌心';
+        }
+        layoutOverlays();
+      }
+    }
+
+    window.__horse = horse;
     window.__loadModel = loadModel;
     window.__setMode = m => { MODE = m; document.body.classList.toggle('table', m === 'table'); };   // 离线自检用
     window.__model = () => ({
       mode: MODE, id: curModelId, ready: modelReady,
-      bbox: horse.children.length ? (() => { const b = new THREE.Box3().setFromObject(horse); const v = new THREE.Vector3(); b.getSize(v); return v.toArray().map(x => +x.toFixed(3)); })() : null
+      info: window.__modelInfo || null,
+      bbox: (() => { const b = new THREE.Box3(); horse.traverse(o => { if (o.isMesh && o.visible && o.geometry && o.geometry.attributes.position) { o.geometry.computeBoundingBox(); b.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrixWorld)); } }); if (b.isEmpty()) return null; const v = new THREE.Vector3(); b.getSize(v); return { size: v.toArray().map(x => +x.toFixed(2)), minY: +b.min.y.toFixed(3) }; })()
     });
   </script>
 </body>

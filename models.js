@@ -7,7 +7,7 @@
 //   · longma：Y 底面≈0；X 低端顶端宽 2.6（头颈），X 高端顶端宽 0.33（细尾）；
 //   · a19/a30 的"头在 -X"另由掌心版实测（180° 翻转后方向才对）与识别卡版的既有朝向约定印证。
 export const MODELS = {
-  a19:    { name: '龙马 A19（当前）', url: './assets/a19.min.glb',    up: [0, 0, 1], head: [-1, 0, 0] },
+  a19:    { name: '龙马 A19', url: './assets/a19.min.glb',    up: [0, 0, 1], head: [-1, 0, 0] },
   a30:    { name: '龙马 A30',        url: './assets/a30.min.glb',    up: [0, 0, 1], head: [-1, 0, 0] },
   longma: { name: '龙马 Longma',     url: './assets/longma.min.glb', up: [0, 1, 0], head: [-1, 0, 0] },
 };
