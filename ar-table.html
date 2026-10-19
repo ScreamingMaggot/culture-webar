@@ -3,11 +3,11 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>龙马 AR 桌面（四角标定 + 点触位移）</title>
+  <title>龙马 AR 桌面（四角标定 + 透视一致的虚拟相机）</title>
   <style>
     html, body { margin: 0; height: 100%; background: #000; color: #eee; font-family: system-ui, "Microsoft YaHei", sans-serif; overflow: hidden; }
     #v { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 0; }
-    #gl { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 1; }
+    #gl { position: fixed; inset: 0; z-index: 1; width: 100%; height: 100%; }
     #calib { position: fixed; inset: 0; z-index: 5; touch-action: none; }
     #calib.hidden { display: none; }
     .corner { position: absolute; width: 34px; height: 34px; margin: -17px; border-radius: 50%; background: rgba(47,111,237,.85); border: 2px solid #fff; cursor: grab; }
@@ -32,8 +32,9 @@
   <canvas id="gl"></canvas>
 
   <div id="start">
-    <h3>龙马 AR 桌面 <span style="font-size:12px;color:#8ab4f8">版本 T2026-10-19f</span></h3>
-    <div class="hint">固定机位对准桌面 → 启动 → 把 4 个蓝点拖到桌面一个已知真实尺寸的矩形四角 → 填 宽×深(米) → 标定 → 点桌面让龙马走过去。<br><b>标定完成前画面不会出现龙马</b>（没有尺寸依据时它只有几十像素高）。</div>
+    <h3>龙马 AR 桌面 <span style="font-size:12px;color:#8ab4f8">版本 T2026-10-19g</span></h3>
+    <div class="hint">固定机位对准桌面 → 启动 → 把 4 个蓝点拖到桌面一个已知真实尺寸的矩形四角 → 填 宽×深(米) → 点“标定”。<br>
+      <b>标定完成后龙马才出现</b>：它的底面就落在四角围出的桌面上，渲染透视由这四个点解出的虚拟相机决定，与画面里的桌面一致。</div>
     <div><select id="cam"></select></div>
     <button id="go">启动摄像头</button>
   </div>
@@ -51,8 +52,8 @@
     <span id="mode" style="margin-left:auto"></span>
   </div>
   <div id="panel">
-    <label>大小 <input id="sSize" type="range" min="0.1" max="1" step="0.05" value="0.35"></label>
-    <label>速度 <input id="sSpeed" type="range" min="0.1" max="1.5" step="0.05" value="0.5"></label>
+    <label>真实高度(米) <input id="sSize" type="range" min="0.05" max="0.8" step="0.01" value="0.3"></label>
+    <label>速度(m/s) <input id="sSpeed" type="range" min="0.05" max="1.5" step="0.05" value="0.3"></label>
     <span style="color:#9fe870">点桌面让龙马走</span>
   </div>
 
@@ -66,156 +67,170 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
+    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=T2026-10-19g';
 
-    const fov = 60;
+    const stEl = document.getElementById('st'), modeEl = document.getElementById('mode');
+    const setSt = (t, warn) => { stEl.textContent = t; stEl.classList.toggle('warn', !!warn); };
+    const Wm = () => parseFloat(document.getElementById('W').value);
+    const Dm = () => parseFloat(document.getElementById('D').value);
+
+    // ---- 三维场景：世界坐标 = 桌面坐标（x 桌宽、y 向上、z 桌深），模型底面在 y=0 ----
     const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gl'), alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(fov, 1, 0.01, 100);
-    camera.position.set(0, 0, 1); camera.lookAt(0, 0, 0);
+    const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 100);
     scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3));
-    const dl = new THREE.DirectionalLight(0xffffff, 1.2); dl.position.set(0.4, 1, 1); scene.add(dl);
-    function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); }
+    const dl = new THREE.DirectionalLight(0xffffff, 1.2); dl.position.set(0.4, 2, 1); scene.add(dl);
+    function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
     addEventListener('resize', resize); resize();
 
-    function screenToWorld(nx, ny){ const h = Math.tan(fov/2*Math.PI/180), w = h*camera.aspect; return new THREE.Vector3((nx*2-1)*w, (1-ny*2)*h, 0); }
-
-    // ---- 载入龙马（底面中心归零、归一到高≈1单位）----
-    let holder = null, modelH = 1;
+    // ---- 载入龙马：底面对齐 y=0、水平居中，高度归一到 1（渲染时按"真实高度(米)"缩放）----
+    let holder = null;
     const draco = new DRACOLoader(); draco.setDecoderPath('./samples/three-webxr-hittest/libs/jsm/libs/draco/gltf/');
     const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
     loader.load('./assets/a19.min.glb', g => {
       const model = g.scene;
-      const box = new THREE.Box3().setFromObject(model); const size = new THREE.Vector3(); box.getSize(size);
+      const box = new THREE.Box3().setFromObject(model);
+      const size = new THREE.Vector3(); box.getSize(size);
       const c = new THREE.Vector3(); box.getCenter(c);
       model.position.set(-c.x, -box.min.y, -c.z);
-      modelH = Math.max(size.x, size.y, size.z);
-      model.scale.setScalar(1/modelH);
+      const hy = (size.y > 0.3 * Math.max(size.x, size.y, size.z)) ? size.y : Math.max(size.x, size.y, size.z);
+      model.scale.setScalar(1 / hy);                    // 高度单位化，后面 holder.scale 直接就是"米"
       holder = new THREE.Group(); holder.add(model); holder.visible = false; scene.add(holder);
-      document.getElementById('mode').textContent = '模型就绪：标定四角后出现在桌面';
-      setSt('模型已就绪（a19.min.glb）· 尚未标定 → ① 拖四角 ② 填宽深 ③ 点“标定”', true);
-    }, undefined, (e) => { document.getElementById('mode').textContent = '模型加载失败'; setSt('模型加载失败：' + ((e && e.message) || e) + ' → 检查网络/刷新', true); });
+      modeEl.textContent = '模型就绪';
+      if (!H) setSt('模型已就绪 · 尚未标定 → ① 拖四角 ② 填宽深 ③ 点“标定”', true);
+    }, undefined, (e) => {
+      modeEl.textContent = '模型加载失败';
+      setSt('模型加载失败：' + ((e && e.message) || e) + '（检查网络后刷新）', true);
+    });
 
-    // ---- 摄像头（deviceId 改写，兼容夸克）----
-    const AUTO='__auto__', sel=document.getElementById('cam');
-    const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
-    const sc=d=>{const l=(d.label||'').toLowerCase();if(BAD.test(l))return -10;if(/back|environment|rear|后置|主摄|wide/i)return 30;if(/front|user|face|前置/i)return 5;return 20;};
-    async function list(){let d=[];try{d=(await navigator.mediaDevices.enumerateDevices()).filter(x=>x.kind==='videoinput');}catch(e){}
-      sel.replaceChildren();const o0=document.createElement('option');o0.value=AUTO;o0.textContent='自动';sel.appendChild(o0);
-      d.sort((a,b)=>sc(b)-sc(a));d.forEach((x,i)=>{const o=document.createElement('option');o.value=x.deviceId;o.textContent=x.label||('摄像头'+i);sel.appendChild(o);});if(d[0])sel.value=d[0].deviceId;}
+    // ---- 摄像头 ----
+    const AUTO = '__auto__', sel = document.getElementById('cam');
+    const BAD = /privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
+    const sc = d => { const l = (d.label || '').toLowerCase(); if (BAD.test(l)) return -10; if (/back|environment|rear|后置|主摄|wide/i.test(l)) return 30; if (/front|user|face|前置/i.test(l)) return 5; return 20; };
+    async function list() { let d = []; try { d = (await navigator.mediaDevices.enumerateDevices()).filter(x => x.kind === 'videoinput'); } catch (e) {} sel.replaceChildren(); const o0 = document.createElement('option'); o0.value = AUTO; o0.textContent = '自动'; sel.appendChild(o0); d.sort((a, b) => sc(b) - sc(a)); d.forEach((x, i) => { const o = document.createElement('option'); o.value = x.deviceId; o.textContent = x.label || ('摄像头' + i); sel.appendChild(o); }); if (d[0]) sel.value = d[0].deviceId; }
     list();
-    let chosen=null;
-    const md=navigator.mediaDevices, orig=md.getUserMedia.bind(md);
-    md.getUserMedia=function(c){c=Object.assign({},c);if(c.video)c.video=(chosen&&chosen!==AUTO)?{deviceId:{exact:chosen}}:true;return orig(c);};
-    document.getElementById('go').addEventListener('click', async ()=>{
-      chosen=sel.value; let stream;
-      try{ stream=await md.getUserMedia({video:true}); }catch(e){ alert('摄像头失败 '+e.name); return; }
-      const video=document.getElementById('v'); video.srcObject=stream; await video.play().catch(()=>{});
-      document.getElementById('start').style.display='none';
+    let chosen = null;
+    const md = navigator.mediaDevices, orig = md.getUserMedia.bind(md);
+    md.getUserMedia = function (c) { c = Object.assign({}, c); if (c.video) c.video = (chosen && chosen !== AUTO) ? { deviceId: { exact: chosen } } : true; return orig(c); };
+    document.getElementById('go').addEventListener('click', async () => {
+      chosen = sel.value; let stream;
+      try { stream = await md.getUserMedia({ video: true }); } catch (e) { alert('摄像头失败 ' + e.name); return; }
+      const video = document.getElementById('v'); video.srcObject = stream; await video.play().catch(() => {});
+      document.getElementById('start').style.display = 'none';
       document.getElementById('calib').classList.remove('hidden');
-      document.getElementById('bar').style.display='flex';
-      document.getElementById('mode').textContent='① 拖四角 ② 填宽深 ③ 点标定（标定后才出现龙马）';
+      document.getElementById('bar').style.display = 'flex';
       resetCorners();
+      modeEl.textContent = '① 拖四角 ② 填宽深 ③ 点标定';
+      if (holder) setSt('模型已就绪 · 尚未标定 → ① 拖四角 ② 填宽深 ③ 点“标定”', true);
     });
 
-    // ---- 四角拖拽 ----
-    let corners=[[0.2,0.35],[0.8,0.35],[0.85,0.8],[0.15,0.8]], drag=-1;
-    function renderCorners(){const W=innerWidth,H=innerHeight;const px=corners.map(c=>[c[0]*W,c[1]*H]);
-      document.getElementById('quad').setAttribute('points',px.map(p=>p.join(',')).join(' '));
-      px.forEach((p,i)=>{const e=document.getElementById('c'+i);e.style.left=p[0]+'px';e.style.top=p[1]+'px';});}
-    function resetCorners(){corners=[[0.2,0.35],[0.8,0.35],[0.85,0.8],[0.15,0.8]];renderCorners();}
-    const calib=document.getElementById('calib');
-    calib.addEventListener('pointerdown',e=>{const id=e.target.id;if(id&&id[0]==='c')drag=+id[1];});
-    window.addEventListener('pointermove',e=>{if(drag<0)return;corners[drag]=[e.clientX/innerWidth,e.clientY/innerHeight];renderCorners();});
-    window.addEventListener('pointerup',()=>drag=-1);
-    window.addEventListener('resize',renderCorners);
-    document.getElementById('recal').addEventListener('click',()=>{calib.classList.remove('hidden');document.getElementById('panel').style.display='none';document.getElementById('mode').textContent='① 拖四角 ② 填宽深 ③ 点标定（标定后才出现龙马）';resetCorners();});
-
-    // ---- 单应性 ----
-    function solveLinear(A,b){const n=A.length;const M=A.map((r,i)=>r.concat(b[i]));
-      for(let i=0;i<n;i++){let p=i;for(let r=i+1;r<n;r++)if(Math.abs(M[r][i])>Math.abs(M[p][i]))p=r;const t=M[i];M[i]=M[p];M[p]=t;if(Math.abs(M[i][i])<1e-12)return null;
-        for(let r=0;r<n;r++){if(r===i)continue;const f=M[r][i]/M[i][i];for(let c=i;c<=n;c++)M[r][c]-=f*M[i][c];}}
-      return M.map((r,i)=>r[n]/r[i]);}
-    function homography(src,dst){const A=[],b=[];for(let i=0;i<4;i++){const[x,y]=src[i],[u,v]=dst[i];
-      A.push([x,y,1,0,0,0,-u*x,-u*y]);b.push(u);A.push([0,0,0,x,y,1,-v*x,-v*y]);b.push(v);}
-      const h=solveLinear(A,b);return h?[h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1]:null;}
-    function apply3(m,x,y){const X=m[0]*x+m[1]*y+m[2],Y=m[3]*x+m[4]*y+m[5],W=m[6]*x+m[7]*y+m[8];return [X/W,Y/W];}
-    function inv3(m){const[a,b,c,d,e,f,g,h,i]=m;const m00=e*i-f*h,m01=c*h-b*i,m02=b*f-c*e,m10=f*g-d*i,m11=a*i-c*g,m12=c*d-a*f,m20=d*h-e*g,m21=b*g-a*h,m22=a*e-b*d;const det=a*m00+b*m10+c*m20;if(!det)return null;const q=1/det;return[m00*q,m01*q,m02*q,m10*q,m11*q,m12*q,m20*q,m21*q,m22*q];}
-
-    let H=null, Hinv=null;                     // H: 桌面(x,z)米 -> 屏幕(px)
-    let tgt=null, cur={x:0,z:0};               // 桌面坐标(m)
-    let speed=0.5, sizeK=0.35, prevScreen=null, hasTarget=false;
-
-    function localScalePxPerM(x,z){ // H 在该点的局部尺度（像素/米）
-      if(!H) return 100; const d=0.05;
-      const a=apply3(H,x,z), b=apply3(H,x+d,z);
-      return Math.hypot(b[0]-a[0], b[1]-a[1]) / d;
+    // ---- 四角拖拽（归一化屏幕坐标）----
+    let corners = [[0.2, 0.35], [0.8, 0.35], [0.85, 0.8], [0.15, 0.8]], drag = -1;
+    function renderCorners() {
+      const W = innerWidth, H = innerHeight, px = corners.map(c => [c[0] * W, c[1] * H]);
+      document.getElementById('quad').setAttribute('points', px.map(p => p.join(',')).join(' '));
+      px.forEach((p, i) => { const e = document.getElementById('c' + i); e.style.left = p[0] + 'px'; e.style.top = p[1] + 'px'; });
     }
-    function tableToScreen(x,z){ return H ? apply3(H,x,z) : [innerWidth/2, innerHeight/2]; }
+    function resetCorners() { corners = [[0.2, 0.35], [0.8, 0.35], [0.85, 0.8], [0.15, 0.8]]; renderCorners(); }
+    const calib = document.getElementById('calib');
+    calib.addEventListener('pointerdown', e => { const id = e.target.id; if (id && id[0] === 'c') drag = +id[1]; });
+    window.addEventListener('pointermove', e => { if (drag < 0) return; corners[drag] = [e.clientX / innerWidth, e.clientY / innerHeight]; renderCorners(); });
+    window.addEventListener('pointerup', () => drag = -1);
+    window.addEventListener('resize', renderCorners);
+    document.getElementById('recal').addEventListener('click', () => {
+      calib.classList.remove('hidden'); document.getElementById('panel').style.display = 'none';
+      H = null; pose = null; if (holder) holder.visible = false;
+      modeEl.textContent = '① 拖四角 ② 填宽深 ③ 点标定';
+      setSt('未标定 · 龙马暂不显示', true); resetCorners();
+    });
 
-    document.getElementById('cal').addEventListener('click',()=>{
-      const Wm=parseFloat(document.getElementById('W').value), Dm=parseFloat(document.getElementById('D').value);
-      if(!(Wm>0&&Dm>0)){ alert('填有效宽/深(米)'); return; }
-      const screen=corners.map(c=>[c[0]*innerWidth, c[1]*innerHeight]); // TL,TR,BR,BL
-      const world=[[-Wm/2,-Dm/2],[Wm/2,-Dm/2],[Wm/2,Dm/2],[-Wm/2,Dm/2]];
-      H=homography(world,screen); if(!H){ alert('标定失败(四角退化)'); return; } Hinv=inv3(H);
-      cur={x:0,z:0}; tgt={x:0,z:0}; hasTarget=false; prevScreen=null;
+    // ---- 标定：四点解单应 → 分解出与桌面透视一致的虚拟相机 ----
+    let H = null, Hinv = null, pose = null;
+    let cur = { x: 0, z: 0 }, tgt = null, speed = 0.3, sizeK = 0.3;
+
+    function applyPose(p) {
+      // R 是 world→camera（CV：y 下、z 朝前）。three 相机 y 上、z 朝后：相机世界旋转 = Rᵀ·diag(1,-1,-1)
+      const m = new THREE.Matrix4().set(
+        p.R[0], p.R[1], p.R[2], 0,
+        p.R[3], p.R[4], p.R[5], 0,
+        p.R[6], p.R[7], p.R[8], 0,
+        0, 0, 0, 1);
+      m.transpose().multiply(new THREE.Matrix4().makeScale(1, -1, -1));
+      camera.quaternion.setFromRotationMatrix(m);
+      camera.position.set(p.C[0], p.C[1], p.C[2]);
+      camera.fov = 2 * Math.atan((innerHeight / 2) / p.f) * 180 / Math.PI;
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+    }
+
+    // 用 three 相机把四个桌角投回屏幕，与拖出来的像素比：整条链路的现场自检
+    function reprojectErrorPx() {
+      let worst = 0;
+      rectCorners(Wm(), Dm()).forEach((p, i) => {
+        const v = new THREE.Vector3(p[0], p[1], p[2]).project(camera);
+        const u = (v.x * 0.5 + 0.5) * innerWidth, vv = (-v.y * 0.5 + 0.5) * innerHeight;
+        worst = Math.max(worst, Math.hypot(u - corners[i][0] * innerWidth, vv - corners[i][1] * innerHeight));
+      });
+      return worst;
+    }
+
+    document.getElementById('cal').addEventListener('click', () => {
+      const w = Wm(), d = Dm();
+      if (!(w > 0 && d > 0)) { alert('填有效的宽/深（米）'); return; }
+      const src = rectCorners(w, d).map(p => [p[0], p[2]]);
+      const dst = corners.map(c => [c[0] * innerWidth, c[1] * innerHeight]);
+      const h = homography(src, dst);
+      if (!h) { alert('四点退化（共线或重合），请重拖'); return; }
+      const p = poseFromHomography(h, innerWidth, innerHeight, 60);
+      if (!p.ok) { alert('标定失败：' + (p.why || '位姿解不出')); return; }
+      H = h; Hinv = inv3(h); pose = p;
+      cur = { x: 0, z: 0 }; tgt = null;
       calib.classList.add('hidden');
-      document.getElementById('panel').style.display='block';
-      document.getElementById('mode').textContent='已标定，点桌面移动';
+      document.getElementById('panel').style.display = 'block';
+      modeEl.textContent = '已标定';
+      applyPose(p);                                     // 近似解也要用（它是当前四点下的最佳拟合）
+      if (p.approx) {
+        setSt('已标定（近似）· 四点不像同一矩形的透视，视场按默认值；若透视不对请重拖四角', true);
+      } else {
+        const err = reprojectErrorPx();
+        setSt('已标定 · 四角复投误差 ' + err.toFixed(2) + ' 像素 · 点桌面让龙马走', err > 3);
+      }
     });
 
-    document.getElementById('sSpeed').addEventListener('input',e=>speed=+e.target.value);
-    document.getElementById('sSize').addEventListener('input',e=>sizeK=+e.target.value);
+    document.getElementById('sSpeed').addEventListener('input', e => speed = +e.target.value);
+    document.getElementById('sSize').addEventListener('input', e => sizeK = +e.target.value);
 
-    // 点击（pointerdown，触摸可靠）→ 桌面坐标
-    window.addEventListener('pointerdown',ev=>{
-      if(!H) return;
-      if(ev.target && ev.target.closest && ev.target.closest('#bar,#panel,#start,#calib')) return;
-      const u=ev.clientX, v=ev.clientY;
-      const [x,z]=apply3(Hinv,u,v);
-      tgt={x,z}; hasTarget=true;
+    // 点击 → 像素经 H⁻¹ 回到桌面坐标（米）
+    window.addEventListener('pointerdown', ev => {
+      if (!H || !Hinv) return;
+      if (ev.target && ev.target.closest && ev.target.closest('#bar,#panel,#start,#calib')) return;
+      const [x, z] = applyH(Hinv, ev.clientX, ev.clientY);
+      if (Number.isFinite(x) && Number.isFinite(z)) tgt = { x, z };
     });
 
-    // 点投影到屏幕（表坐标->屏幕） -> 转 three 世界(z=0) 放置基座
-    const stEl = document.getElementById('st');
-    function setSt(t, warn) { stEl.textContent = t; stEl.classList.toggle('warn', !!warn); }
-
-    function place(){
-      if(!holder) return;
-      // 没标定就没有"桌面到画面"的尺寸依据：此时算出来的模型只有几十像素高，
-      // 会被四个拖拽点压在下面，看上去像"模型没加载"。所以标定前干脆不显示，并把话说明白。
-      if(!H){ holder.visible=false; return; }
-      const [u,v]=tableToScreen(cur.x, cur.z);
-      const wp=screenToWorld(u/innerWidth, v/innerHeight);
-      holder.position.set(wp.x, wp.y, wp.z);
-      // 尺寸：桌面局部尺度(px/m) × 期望真实高度(m) ÷ (每世界单位多少px)
-      const ppw=innerHeight/(2*Math.tan(fov/2*Math.PI/180));
-      const px=localScalePxPerM(cur.x,cur.z) * sizeK;   // sizeK≈龙马在桌上的"米"
-      holder.scale.setScalar(Math.max(px/ppw, 1e-4));
-      // 朝向：面向镜头，行进时略转向行进方向
-      if(hasTarget){
-        const dv=[tgt.x-cur.x, tgt.z-cur.z]; const l=Math.hypot(dv[0],dv[1])||1;
-        holder.rotation.y = -Math.atan2(dv[1], dv[0]) + Math.PI/2; // 屏幕内朝向行进
-      }
-      holder.visible=true;
-      if ((place.n = (place.n || 0) + 1) % 12 === 0) {
-        const hPx = holder.scale.x * ppw;
-        setSt('已标定 · 模型在桌面中心 · 屏上高约 ' + Math.round(hPx) + ' 像素'
-          + (hPx < 40 ? ' ⚠ 太小：检查四角是否框住整张桌面、宽深是否填对' : '') + ' · 点桌面让它走', hPx < 40);
-      }
+    function place() {
+      if (!holder || !H) return;
+      holder.visible = true;
+      holder.position.set(cur.x, 0, cur.z);
+      holder.scale.setScalar(sizeK);                    // 模型高度归一到 1，这里就是真实高度（米）
+      if (tgt) holder.rotation.y = -Math.atan2(tgt.z - cur.z, tgt.x - cur.x) + Math.PI / 2;
     }
 
-    let last=0;
-    (function loop(ts){
+    let last = 0;
+    (function loop(ts) {
       requestAnimationFrame(loop);
-      const dt=last?Math.min((ts-last)/1000,0.05):0; last=ts;
-      if(hasTarget && H){
-        const dx=tgt.x-cur.x, dz=tgt.z-cur.z, dist=Math.hypot(dx,dz);
-        if(dist<0.005){ hasTarget=false; } else { const st=Math.min(speed*dt,dist)/dist; cur.x+=dx*st; cur.z+=dz*st; }
+      const dt = last ? Math.min((ts - last) / 1000, 0.05) : 0; last = ts;
+      if (tgt && H) {
+        const dx = tgt.x - cur.x, dz = tgt.z - cur.z, dist = Math.hypot(dx, dz);
+        if (dist < 0.005) { tgt = null; } else {
+          const st = Math.min(speed * dt, dist) / dist;
+          cur.x += dx * st; cur.z += dz * st;
+        }
       }
       place();
-      renderer.render(scene,camera);
+      renderer.render(scene, camera);
     })(0);
   </script>
 </body>
