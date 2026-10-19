@@ -182,6 +182,7 @@
         <div class="actions">
           <button id="goBT" class="btn ghost">连接蓝牙</button>
           <button id="goDiag" class="btn ghost">蓝牙自检</button>
+          <button id="importStart" class="btn ghost">导入模型（.glb）</button>
         </div>
       </div>
 
@@ -212,9 +213,17 @@
       <span class="chip" id="modeChip">掌心</span>
       <div id="bt" class="chip palm-only" style="background:rgba(255,255,255,.05);border-color:var(--line);color:var(--muted)">蓝牙：未连接</div>
       <label class="field"><span>模型</span><select id="modelSel"></select></label>
+      <button id="importPanel" class="btn small">导入</button>
       <button id="collapse" class="btn small" aria-expanded="true">收起</button>
     </div>
     <div id="sheetBody">
+    <div id="customRow" class="row tools" style="display:none">
+      <span class="row-label">自定义朝向</span>
+      <button class="btn small" data-rot="x">绕 X 90°</button>
+      <button class="btn small" data-rot="y">绕 Y 180°</button>
+      <button class="btn small" data-rot="z">绕 Z 90°</button>
+      <button class="btn small" data-rot="reset">复位</button>
+    </div>
     <div class="palm-only">
       <div class="grid sliders">
         <label class="slider"><span>大小</span><input id="sScale" type="range" min="0.2" max="3" step="0.05" value="1"><output id="oSScale">1.00×</output></label>
@@ -244,6 +253,8 @@
     </div>
     </div>
   </div>
+
+  <input id="fileModel" type="file" accept=".glb,model/gltf-binary" style="display:none">
 
   <script type="importmap">
   { "imports": {
@@ -326,8 +337,14 @@
     const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
     let baseScale = 1, curModelId = 'a19', modelReady = false;
 
+    let customPreset = null;
+    const customExtra = new THREE.Quaternion();          // 导入模型的朝向微调（本地轴）
+    function currentPreset(id) {
+      if (id === '__custom__' && customPreset) return customPreset;
+      return MODELS[id] || MODELS.a19;
+    }
     function loadModel(id) {
-      const preset = MODELS[id] || MODELS.a19;
+      const preset = currentPreset(id);
       curModelId = id; modelReady = false;
       while (horse.children.length) {
         const c = horse.children.pop();
@@ -341,6 +358,7 @@
         const cols = (MODE === 'table') ? standColumns(preset) : a19Columns(preset);
         model.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(
           new THREE.Vector3(...cols[0]), new THREE.Vector3(...cols[1]), new THREE.Vector3(...cols[2])));
+        if (preset.custom) model.quaternion.multiply(customExtra);   // 用户微调叠加在自动轴系之后
         model.updateMatrixWorld(true);
         const box = new THREE.Box3().setFromObject(model);
         const size = new THREE.Vector3(); box.getSize(size);
@@ -393,10 +411,55 @@
     Object.entries(MODELS).forEach(([id, m]) => { const o = document.createElement('option'); o.value = id; o.textContent = m.name; modelSel.appendChild(o); });
     const savedModel = (() => { try { return localStorage.getItem('longmaModel'); } catch (e) { return null; } })();
     modelSel.value = MODELS[savedModel] ? savedModel : 'a19';
+    function ensureCustomOption(name) {
+      let o = modelSel.querySelector('option[value="__custom__"]');
+      if (!o) { o = document.createElement('option'); o.value = '__custom__'; modelSel.appendChild(o); }
+      o.textContent = '自定义：' + name;
+      return o;
+    }
     modelSel.addEventListener('change', () => {
       try { localStorage.setItem('longmaModel', modelSel.value); } catch (e) {}
+      document.getElementById('customRow').style.display = (modelSel.value === '__custom__') ? 'flex' : 'none';
       loadModel(modelSel.value);
     });
+
+    // 导入用户模型（单文件 .glb；与内置模型走同一条归一化/落地/轴系管线）
+    function importFile(file) {
+      if (!/\.glb$/i.test(file.name)) { alert('请选择单文件 .glb 模型（.gltf 的外置 bin/贴图在网页里取不到）'); return; }
+      if (!(file.size > 0)) { alert('文件为空'); return; }
+      if (customPreset && customPreset.url && customPreset.url.startsWith('blob:')) URL.revokeObjectURL(customPreset.url);
+      customPreset = { name: file.name, url: URL.createObjectURL(file), up: [0, 1, 0], head: [-1, 0, 0], custom: true };
+      customExtra.identity();
+      ensureCustomOption(file.name);
+      modelSel.value = '__custom__';
+      document.getElementById('customRow').style.display = 'flex';
+      loadModel('__custom__');
+    }
+    const fileInput = document.getElementById('fileModel');
+    ['importStart', 'importPanel'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) b.addEventListener('click', ev => { ev.stopPropagation(); fileInput.click(); });
+    });
+    fileInput.addEventListener('change', () => { const f = fileInput.files && fileInput.files[0]; if (f) importFile(f); fileInput.value = ''; });
+    document.querySelectorAll('#customRow [data-rot]').forEach(btn => btn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const r = btn.dataset.rot;
+      if (r === 'reset') customExtra.identity();
+      else {
+        const axis = r === 'x' ? new THREE.Vector3(1, 0, 0) : r === 'y' ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+        customExtra.multiply(new THREE.Quaternion().setFromAxisAngle(axis, r === 'y' ? Math.PI : Math.PI / 2));
+      }
+      if (modelSel.value === '__custom__') loadModel('__custom__');
+    }));
+    // 离线自检：用现成 URL 走一遍"导入"流程
+    window.__importURL = (url, name) => {
+      customPreset = { name: name || 'imported.glb', url, up: [0, 1, 0], head: [-1, 0, 0], custom: true };
+      customExtra.identity();
+      ensureCustomOption(customPreset.name);
+      modelSel.value = '__custom__';
+      document.getElementById('customRow').style.display = 'flex';
+      loadModel('__custom__');
+    };
 
     // ================= 掌心模式 =================
     const sScale = document.getElementById('sScale');
