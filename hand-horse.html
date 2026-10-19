@@ -77,9 +77,9 @@
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     // 导入带 ?v=：GitHub Pages 对 .js 有缓存，手机改了 ble.js 却仍在跑旧的那份时会看不出差别
-    import { BleClient, hex } from './ble.js?v=H2026-10-17e';
-    import { RxBridge } from './rxbridge.js?v=H2026-10-17e';
-    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=H2026-10-17e';
+    import { BleClient, hex } from './ble.js?v=H2026-10-19f';
+    import { RxBridge } from './rxbridge.js?v=H2026-10-19f';
+    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=H2026-10-19f';
 
     const AUTO='__auto__', sel=document.getElementById('cam');
     const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
@@ -91,7 +91,7 @@
     list();
 
     const hud=document.getElementById('hud');
-    const VER='H2026-10-17e';   // 页面版本：出问题时先确认不是旧缓存
+    const VER='H2026-10-19f';   // 页面版本：出问题时先确认不是旧缓存
     document.getElementById('ver').textContent='版本 '+VER;
     const video=document.getElementById('v');
     const canvas=document.getElementById('gl');
@@ -259,10 +259,13 @@
     const HS_CN = { Right: '右手', Left: '左手' };
     const ls = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
     const save = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
-    let HS = Object.assign({}, HS_DEFAULT);
-    for (const k of ['Right', 'Left']) { const v = +ls('hsSign_' + k, HS_DEFAULT[k]); if (v === 1 || v === -1) HS[k] = v; }
+    // 实测口径（2026-10-19，真机确认）：MediaPipe 世界坐标无需再做水平镜像；左右手标签与坐标口径相反，
+    // 所以每只手的符号常数取反。两者都可在页面上切换并记住本机值。
+    const HS_PAGE = { Right: -HS_DEFAULT.Right, Left: -HS_DEFAULT.Left };
+    let HS = Object.assign({}, HS_PAGE);
+    for (const k of ['Right', 'Left']) { const v = +ls('hsSign_' + k, HS_PAGE[k]); if (v === 1 || v === -1) HS[k] = v; }
     let curHand = null, handPresent = false;   // prevNormal 在上方与姿态量一起声明
-    let mirrorOn = ls('mirrorOn', '1') === '1';   // 朝向是否按"显示所见"做水平镜像（1=跟随镜像后的画面）
+    let mirrorOn = ls('mirrorOn', '0') === '1';   // 朝向是否按"显示所见"做水平镜像（默认关，实测为准）
     let showAxes = ls('showAxes', '0') === '1';   // 掌轴三色线：红x 绿y 蓝z，用来肉眼核对"手往哪转、轴往哪转"
     const btnMirror = document.getElementById('btnMirror'), btnAxes = document.getElementById('btnAxes');
     const paintBtn = () => { btnMirror.style.opacity = mirrorOn ? 1 : .45; btnAxes.style.opacity = showAxes ? 1 : .45; };
