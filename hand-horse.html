@@ -58,6 +58,7 @@
       跳舞 <input class="bcmd" id="bDance" data-key="dance" maxlength="2" size="2"><button class="bsend" data-key="dance">发</button>
       唱歌 <input class="bcmd" id="bSing" data-key="sing" maxlength="2" size="2"><button class="bsend" data-key="sing">发</button>
       科普 <input class="bcmd" id="bSci" data-key="science" maxlength="2" size="2"><button class="bsend" data-key="science">发</button>
+      <button class="bsend" id="btnFlip" style="background:#7a4f9f">翻转这只手</button>
       <button class="bsend" id="btnDiag" style="background:#37517a">自检</button>
     </div>
   </div>
@@ -74,8 +75,9 @@
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
     // 导入带 ?v=：GitHub Pages 对 .js 有缓存，手机改了 ble.js 却仍在跑旧的那份时会看不出差别
-    import { BleClient, hex } from './ble.js?v=H2026-10-17c';
-    import { RxBridge } from './rxbridge.js?v=H2026-10-17c';
+    import { BleClient, hex } from './ble.js?v=H2026-10-17d';
+    import { RxBridge } from './rxbridge.js?v=H2026-10-17d';
+    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=H2026-10-17d';
 
     const AUTO='__auto__', sel=document.getElementById('cam');
     const BAD=/privacy|virtual|obs|parsec|emulator|hello|3d\s*sr|背景|blur|bokeh/i;
@@ -87,7 +89,7 @@
     list();
 
     const hud=document.getElementById('hud');
-    const VER='H2026-10-17c';   // 页面版本：出问题时先确认不是旧缓存
+    const VER='H2026-10-17d';   // 页面版本：出问题时先确认不是旧缓存
     document.getElementById('ver').textContent='版本 '+VER;
     const video=document.getElementById('v');
     const canvas=document.getElementById('gl');
@@ -108,7 +110,7 @@
     function resize(){ renderer.setSize(innerWidth, innerHeight); camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); }
     addEventListener('resize', resize); resize();
 
-    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, rollDeg=270, prevNormal=new THREE.Vector3(0,0,1), moveTarget=null, created=false;
+    let horse=null, baseScale=1, yawDeg=0, pitchDeg=0, rollDeg=270, prevNormal=null, moveTarget=null, created=false;
 
     // ---- 手势 → 龙马功能。固件表(talk.c deal())只有 0x09=跳舞；唱歌/科普的字节由王子涵定，
     //      未填则只屏显不发送。三个字节都可在下方"指令字节"框现场改（存 localStorage，免重新部署）。
@@ -244,10 +246,27 @@
     }, (p)=>{ if(p&&p.total) window.__loadState='loading '+Math.round(p.loaded/p.total*100)+'%'; },
        (e)=>{ window.__loadState='err:'+((e&&e.message)||e); hud.textContent='❌ 模型加载失败: '+((e&&e.message)||e); });
 
-    document.getElementById('sScale').addEventListener('input',e=>{});
-    document.getElementById('sYaw').addEventListener('input',e=>{ yawDeg=+e.target.value; });
-    document.getElementById('sPitch').addEventListener('input',e=>{ pitchDeg=+e.target.value; });
-    document.getElementById('sRoll').addEventListener('input',e=>{ rollDeg=+e.target.value; });
+    // ---- 朝向的三个可调量：滑动条改完记在本机（换人/换镜头不必重部署）；"翻转这只手"只改当前这只手的符号常数
+    const HS_CN = { Right: '右手', Left: '左手' };
+    const ls = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; } };
+    const save = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+    let HS = Object.assign({}, HS_DEFAULT);
+    for (const k of ['Right', 'Left']) { const v = +ls('hsSign_' + k, HS_DEFAULT[k]); if (v === 1 || v === -1) HS[k] = v; }
+    let curHand = null, handPresent = false;   // prevNormal 在上方与姿态量一起声明
+    const sl = [{ id: 'sYaw', set: v => yawDeg = v }, { id: 'sPitch', set: v => pitchDeg = v }, { id: 'sRoll', set: v => rollDeg = v }];
+    sl.forEach(o => {
+      const el = document.getElementById(o.id);
+      el.value = ls(o.id, el.value); o.set(+el.value);
+      el.addEventListener('input', e => { o.set(+e.target.value); save(o.id, e.target.value); });
+    });
+    document.getElementById('sScale').addEventListener('input', e => {});
+    const btnFlip = document.getElementById('btnFlip');
+    btnFlip.addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (!curHand) { hud.textContent = '先伸出手掌，让页面认出左手/右手，再点"翻转这只手"'; return; }
+      HS[curHand] = -(HS[curHand] || 1); save('hsSign_' + curHand, HS[curHand]); prevNormal = null;
+      hud.textContent = '已翻转' + HS_CN[curHand] + '的掌心朝向（本机记住）· 再点一次可翻回来';
+    });
 
     // 屏幕(归一化) → z=0 平面的世界坐标
     function screenToWorld(nx, ny){
@@ -258,8 +277,10 @@
     const smoothPos=new THREE.Vector3(); let haveSmooth=false, visible=false;
 
     // 点击屏幕 → 龙马平移到该点（window 上监听 pointerdown，触摸更可靠）
+    // 只在画面里有手时生效：没有手就没有"地面"参照，模型会像贴在屏幕上滑动，看着很假
     window.addEventListener('pointerdown', (ev)=>{
       if(ev.target && ev.target.closest && ev.target.closest('#panel,#hud,#start,#bt,#rx,#diag')) return;
+      if(!handPresent){ hud.textContent='画面里还没有手 · 先张开手掌把龙马召出来，再点屏幕让它走'; return; }
       const r=renderer.domElement.getBoundingClientRect();
       const nx=(ev.clientX-r.left)/r.width, ny=(ev.clientY-r.top)/r.height;
       moveTarget = screenToWorld(nx, ny);
@@ -286,6 +307,7 @@
         if(video.readyState<2 || video.currentTime===lastT) { renderer.render(scene,camera); return; }
         lastT=video.currentTime;
         let res=null; try{ res=gr.recognizeForVideo(video, now); }catch(e){}
+        handPresent = !!(res && res.landmarks && res.landmarks[0]);
         renderer.render(scene,camera);
         if(!res || !horse){
           const gc = res && res.gestures && res.gestures[0] && res.gestures[0][0];
@@ -316,21 +338,24 @@
           if(Number.isFinite(scale) && scale>1e-6) horse.scale.setScalar(scale * (+document.getElementById('sScale').value));
           horse.position.copy(smoothPos);
           const wl=(res.worldLandmarks && res.worldLandmarks[0]) || hand;
-          const dw=(i,j)=> new THREE.Vector3(-(wl[i].x-wl[j].x), -(wl[i].y-wl[j].y), -(wl[i].z-wl[j].z));
-          const yAxis=dw(9,0); if(!Number.isFinite(yAxis.x)||yAxis.lengthSq()<1e-12) yAxis.set(0,1,0); yAxis.normalize();
-          const across=dw(17,5); if(!Number.isFinite(across.x)||across.lengthSq()<1e-12) across.set(1,0,0); across.normalize();
-          const n=new THREE.Vector3().crossVectors(across,yAxis); if(!Number.isFinite(n.x)||n.lengthSq()<1e-12) n.set(0,0,1); n.normalize();
-          if(prevNormal && n.dot(prevNormal)<0) n.negate(); prevNormal=n.clone();
-          let xAxis=n.clone().negate(); xAxis.sub(yAxis.clone().multiplyScalar(xAxis.dot(yAxis)));
-          if(!Number.isFinite(xAxis.x)||xAxis.lengthSq()<1e-6) xAxis.set(0,0,-1); else xAxis.normalize();
-          const zAxis=new THREE.Vector3().crossVectors(xAxis,yAxis); if(!Number.isFinite(zAxis.x)||zAxis.lengthSq()<1e-6) zAxis.set(1,0,0); zAxis.normalize();
-          let q=new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis,yAxis,zAxis));
-          const off=new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(rollDeg), THREE.MathUtils.degToRad(yawDeg), THREE.MathUtils.degToRad(pitchDeg))); q.multiply(off);
-          if(Number.isFinite(q.x)&&Number.isFinite(q.y)&&Number.isFinite(q.z)&&Number.isFinite(q.w)) horse.quaternion.slerp(q, 0.6);
+          // 朝向由 palmframe.js 计算：① 法线符号由左右手标签决定（不再用"与相机光轴点积"定符号）
+          // ② 先把坐标换到"显示空间"再算，与位置的 1-cx 补偿同一条管，否则手往右倾、模型往左旋
+          const hn = (res.handednesses && res.handednesses[0] && res.handednesses[0][0] && res.handednesses[0][0].categoryName)
+                  || (res.handedness && res.handedness[0] && res.handedness[0][0] && res.handedness[0][0].categoryName) || null;
+          if (hn) curHand = hn;
+          const f = palmBasis(toDisplay(wl), hn, HS, prevNormal);
+          if (f) {
+            prevNormal = f.n;
+            const V = a => new THREE.Vector3(a[0], a[1], a[2]);
+            let q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(V(f.x), V(f.y), V(f.z)));
+            const off=new THREE.Quaternion().setFromEuler(new THREE.Euler(THREE.MathUtils.degToRad(rollDeg), THREE.MathUtils.degToRad(yawDeg), THREE.MathUtils.degToRad(pitchDeg))); q.multiply(off);
+            if(Number.isFinite(q.x)&&Number.isFinite(q.y)&&Number.isFinite(q.z)&&Number.isFinite(q.w)) horse.quaternion.slerp(q, 0.6);
+          }
           horse.visible=true;
-          hud.textContent='① 手掌跟随 · 手势 '+cat+' ('+Math.round((g.score||0)*100)+'%)';
+          hud.textContent='① 手掌跟随 · 手势 '+cat+' ('+Math.round((g.score||0)*100)+'%) · '+(HS_CN[curHand]||'手别未识别');
         } else if(created){
-          // ② 其它手势 / 无手：不跟随；点屏幕(鼠标)位移
+          // ② 手在画面里但不是张掌：不再跟随掌心；此时点屏幕可以让它走过去
+          //    （手不在画面里时点触被忽略——没有参照面时"贴屏幕滑动"看起来很假）
           if(moveTarget) smoothPos.lerp(moveTarget, 0.35);
           horse.position.copy(smoothPos);
           horse.visible=true;
@@ -342,7 +367,7 @@
             }
           }
           hud.textContent = fn ? ('③ 已触发 «'+fn.name+'» '+(fn.byte!=null?hex(fn.byte):'字节待确认')+'（不跟随）')
-                              : (cat ? ('手势 '+cat+'（不跟随）· 可点屏幕移动') : '② 没有手 · 点屏幕让龙马移动');
+                              : (cat ? ('手势 '+cat+'（不跟随）· 可点屏幕移动') : '② 手不在画面里 · 龙马停在原地，先伸出手掌再点屏幕');
         } else {
           if(horse) horse.visible=false;
           hud.textContent = cat ? ('手势 '+cat+' — 张开手掌召出龙马') : '张开手掌，让龙马出现';

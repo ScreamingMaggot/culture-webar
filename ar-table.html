@@ -29,8 +29,8 @@
   <canvas id="gl"></canvas>
 
   <div id="start">
-    <h3>龙马 AR 桌面</h3>
-    <div class="hint">固定机位对准桌面 → 启动 → 把 4 个蓝点拖到桌面一个已知真实尺寸的矩形四角 → 填 宽×深(米) → 标定 → 点桌面让龙马走过去。</div>
+    <h3>龙马 AR 桌面 <span style="font-size:12px;color:#8ab4f8">版本 T2026-10-17d</span></h3>
+    <div class="hint">固定机位对准桌面 → 启动 → 把 4 个蓝点拖到桌面一个已知真实尺寸的矩形四角 → 填 宽×深(米) → 标定 → 点桌面让龙马走过去。<br><b>标定完成前画面不会出现龙马</b>（没有尺寸依据时它只有几十像素高）。</div>
     <div><select id="cam"></select></div>
     <button id="go">启动摄像头</button>
   </div>
@@ -88,7 +88,7 @@
       modelH = Math.max(size.x, size.y, size.z);
       model.scale.setScalar(1/modelH);
       holder = new THREE.Group(); holder.add(model); holder.visible = false; scene.add(holder);
-      document.getElementById('mode').textContent = '模型就绪';
+      document.getElementById('mode').textContent = '模型就绪：标定四角后出现在桌面';
     }, undefined, () => { document.getElementById('mode').textContent = '模型加载失败'; });
 
     // ---- 摄像头（deviceId 改写，兼容夸克）----
@@ -109,7 +109,7 @@
       document.getElementById('start').style.display='none';
       document.getElementById('calib').classList.remove('hidden');
       document.getElementById('bar').style.display='flex';
-      document.getElementById('mode').textContent='拖四角→填尺寸→标定';
+      document.getElementById('mode').textContent='① 拖四角 ② 填宽深 ③ 点标定（标定后才出现龙马）';
       resetCorners();
     });
 
@@ -124,7 +124,7 @@
     window.addEventListener('pointermove',e=>{if(drag<0)return;corners[drag]=[e.clientX/innerWidth,e.clientY/innerHeight];renderCorners();});
     window.addEventListener('pointerup',()=>drag=-1);
     window.addEventListener('resize',renderCorners);
-    document.getElementById('recal').addEventListener('click',()=>{calib.classList.remove('hidden');document.getElementById('panel').style.display='none';document.getElementById('mode').textContent='拖四角→填尺寸→标定';resetCorners();});
+    document.getElementById('recal').addEventListener('click',()=>{calib.classList.remove('hidden');document.getElementById('panel').style.display='none';document.getElementById('mode').textContent='① 拖四角 ② 填宽深 ③ 点标定（标定后才出现龙马）';resetCorners();});
 
     // ---- 单应性 ----
     function solveLinear(A,b){const n=A.length;const M=A.map((r,i)=>r.concat(b[i]));
@@ -175,6 +175,9 @@
     // 点投影到屏幕（表坐标->屏幕） -> 转 three 世界(z=0) 放置基座
     function place(){
       if(!holder) return;
+      // 没标定就没有"桌面到画面"的尺寸依据：此时算出来的模型只有几十像素高，
+      // 会被四个拖拽点压在下面，看上去像"模型没加载"。所以标定前干脆不显示，并把话说明白。
+      if(!H){ holder.visible=false; return; }
       const [u,v]=tableToScreen(cur.x, cur.z);
       const wp=screenToWorld(u/innerWidth, v/innerHeight);
       holder.position.set(wp.x, wp.y, wp.z);
