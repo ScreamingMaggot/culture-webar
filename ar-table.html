@@ -32,7 +32,7 @@
   <canvas id="gl"></canvas>
 
   <div id="start">
-    <h3>龙马 AR 桌面 <span style="font-size:12px;color:#8ab4f8">版本 T2026-10-19i</span></h3>
+    <h3>龙马 AR 桌面 <span style="font-size:12px;color:#8ab4f8">版本 T2026-10-19j</span></h3>
     <div class="hint">固定机位对准桌面 → 启动 → 把 4 个蓝点拖到桌面一个已知真实尺寸的矩形四角 → 填 宽×深(米) → 点“标定”。<br>
       <b>标定完成后龙马才出现</b>：它的底面就落在四角围出的桌面上，渲染透视由这四个点解出的虚拟相机决定，与画面里的桌面一致。</div>
     <div><select id="cam"></select></div>
@@ -67,7 +67,7 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=T2026-10-19i';
+    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=T2026-10-19j';
 
     const stEl = document.getElementById('st'), modeEl = document.getElementById('mode');
     const setSt = (t, warn) => { stEl.textContent = t; stEl.classList.toggle('warn', !!warn); };
@@ -99,6 +99,8 @@
         new THREE.Vector3(0, 0, 1),    // 局部 +X（头朝）→ 世界 +Z（前）
         new THREE.Vector3(1, 0, 0),    // 局部 +Y（左右）→ 世界 +X
         new THREE.Vector3(0, 1, 0)));  // 局部 +Z（上）  → 世界 +Y
+      // 实测头尾反了：再绕世界 Y 轴转 180°，上方向与右手性都不变
+      model.quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI));
       model.updateMatrixWorld(true);
       const box = new THREE.Box3().setFromObject(model);
       const size = new THREE.Vector3(); box.getSize(size);
