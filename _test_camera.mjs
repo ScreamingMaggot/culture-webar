@@ -34,4 +34,24 @@ corners.forEach((p,i)=>{
 });
 console.log('three 相机四角复投最差误差 =', worst.toExponential(2), '像素');
 console.log(worst < 0.1 ? '✅ 页面相机换算正确' : '❌ 页面相机换算有误');
-process.exit(worst < 0.1 ? 0 : 1);
+const cameraOk = worst < 0.1;
+
+// ---- 回归：模型归一化的"缩放与平移必须同层" ----
+// 用 a19.min.glb 的真实包围盒：min(-100.8,-77.68,0) max(114.03,77.68,125.47)
+const bmin = [-100.8, -77.677, 0], bmax = [114.025, 77.677, 125.466];
+const bsize = bmax.map((v, i) => v - bmin[i]);
+const bctr = bmin.map((v, i) => (v + bmax[i]) / 2);
+const hy = Math.max(...bsize), s = 1 / hy, holderS = 0.3;
+const offset = [-bctr[0], -bmin[1], -bctr[2]];
+// 底面中心的顶点（局部坐标）
+const vtx = [bctr[0], bmin[1], bctr[2]];
+// 旧写法：scale 加在 model 上 → model.position 不被自身缩放影响
+const bad = offset.map((o, i) => holderS * (o + s * vtx[i]));
+// 新写法：unit（缩放层）包住 model，holder（米制层）再包 unit
+const good = offset.map((o, i) => holderS * s * (o + vtx[i]));
+const badDist = Math.hypot(...bad), goodDist = Math.hypot(...good);
+console.log('\n模型归一化回归：旧层级底面中心 = ' + bad.map(v => v.toFixed(2)) + '（距桌心 ' + badDist.toFixed(1) + ' 米）');
+console.log('                 新层级底面中心 = ' + good.map(v => v.toExponential(1)) + '（距桌心 ' + goodDist.toExponential(1) + ' 米）');
+const nOk = badDist > 10 && goodDist < 1e-9;
+process.exit(cameraOk && nOk ? 0 : 1);
+console.log(nOk ? '✅ 旧写法确实把模型抛到十米外；新写法底面精确落在桌心' : '❌ 归一化层级回归失败');
