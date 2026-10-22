@@ -234,9 +234,10 @@
       <div class="row" id="cmdrow">
         <span class="row-label">动作码</span>
         <label class="cmd">跳舞<input class="bcmd" id="bDance" data-key="dance" maxlength="2" size="2"><button class="bsend" data-key="dance">发送</button></label>
-        <label class="cmd">唱歌<input class="bcmd" id="bSing" data-key="sing" maxlength="2" size="2"><button class="bsend" data-key="sing">发送</button></label>
-        <label class="cmd">科普<input class="bcmd" id="bSci" data-key="science" maxlength="2" size="2"><button class="bsend" data-key="science">发送</button></label>
+        <label class="cmd">前进<input class="bcmd" id="bWalk" data-key="walk" maxlength="2" size="2"><button class="bsend" data-key="walk">发送</button></label>
+        <label class="cmd">呼吸灯<input class="bcmd" id="bLight" data-key="light" maxlength="2" size="2"><button class="bsend" data-key="light">发送</button></label>
       </div>
+      <div class="row hintline" style="margin-top:6px">指令表：02 立正 · 03 前进 · 04 撤退 · 05 握手 · 09 跳舞 · 0A 趴下 · 0B 蹲下 · 0C 摇尾巴 · 0F 呼吸灯 · 10 充能 · 11 关灯（方框里可直接改成任意值）</div>
       <div class="row tools">
         <button id="btnFlip" class="btn small">翻转朝向</button>
         <button id="btnMirror" class="btn small">镜像修正</button>
@@ -268,13 +269,13 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-    import { BleClient, hex } from './ble.js?v=L2026-10-21d';
-    import { RxBridge } from './rxbridge.js?v=L2026-10-21d';
-    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-21d';
-    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-21d';
-    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-21d';
+    import { BleClient, hex } from './ble.js?v=L2026-10-21e';
+    import { RxBridge } from './rxbridge.js?v=L2026-10-21e';
+    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-21e';
+    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-21e';
+    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-21e';
 
-    const VER = 'L2026-10-21d';
+    const VER = 'L2026-10-21e';
     document.getElementById('ver').textContent = '版本 ' + VER;
     let MODE = 'palm';                                   // 'palm' | 'table'
 
@@ -516,10 +517,14 @@
     });
 
     // 手势 → 功能
+    // 指令表（王子涵提供）：02 立正 / 03 前进 / 04 撤退 / 05 握手 / 09 跳舞 /
+    //   0A 趴下 / 0B 蹲下 / 0C 摇尾巴 / 0F 呼吸灯 / 10 充能 / 11 关灯。
+    //   唱歌、科普是语音芯片自身功能（不经 MCU/蓝牙），所以换成蓝牙可控的“前进”“呼吸灯”。
+    //   绝对不要发 0x71（会关掉蓝牙）。
     const FN = {
-      'Pointing_Up': { key: 'dance',   name: '跳舞', byte: 0x09 },
-      'Victory':     { key: 'sing',    name: '唱歌', byte: null },
-      'Closed_Fist': { key: 'science', name: '科普', byte: null }
+      'Pointing_Up': { key: 'dance', name: '跳舞',   byte: 0x09 },
+      'Victory':     { key: 'walk',  name: '前进',   byte: 0x03 },
+      'Closed_Fist': { key: 'light', name: '呼吸灯', byte: 0x0F }
     };
     try {
       Object.values(FN).forEach(f => {
@@ -628,6 +633,7 @@
     const toHex = b => b.toString(16).toUpperCase().padStart(2, '0');
     document.querySelectorAll('.bcmd').forEach(inp => {
       const f = FN_BY_KEY[inp.dataset.key];
+      if (!f) return;
       inp.value = f.byte == null ? '' : toHex(f.byte);
       inp.addEventListener('change', () => {
         const h = inp.value.replace(/[^0-9a-fA-F]/g, '').slice(0, 2);
