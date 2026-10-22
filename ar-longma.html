@@ -241,6 +241,7 @@
         <button id="btnFlip" class="btn small">翻转朝向</button>
         <button id="btnMirror" class="btn small">镜像修正</button>
         <button id="btnAxes" class="btn small">坐标轴</button>
+        <button id="btnAck" class="btn small">设备回读：开</button>
         <button id="btnDiag" class="btn small">蓝牙自检</button>
       </div>
     </div>
@@ -267,13 +268,13 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-    import { BleClient, hex } from './ble.js?v=L2026-10-21c';
-    import { RxBridge } from './rxbridge.js?v=L2026-10-21c';
-    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-21c';
-    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-21c';
-    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-21c';
+    import { BleClient, hex } from './ble.js?v=L2026-10-21d';
+    import { RxBridge } from './rxbridge.js?v=L2026-10-21d';
+    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-21d';
+    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-21d';
+    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-21d';
 
-    const VER = 'L2026-10-21c';
+    const VER = 'L2026-10-21d';
     document.getElementById('ver').textContent = '版本 ' + VER;
     let MODE = 'palm';                                   // 'palm' | 'table'
 
@@ -479,6 +480,7 @@
     let curHand = null, handPresent = false, prevNormal = null;
     let mirrorOn = ls('mirrorOn', '0') === '1';      // 实测：前置链路不做水平镜像
     let showAxes = ls('showAxes', '0') === '1';
+    let ackMode = ls('ackMode', '1') === '1';   // 设备固件是否回显；关掉则只确认"已发出"
     let yawDeg = 0, pitchDeg = 0, rollDeg = 270, moveTarget = null, created = false;
 
     const btnMirror = document.getElementById('btnMirror'), btnAxes = document.getElementById('btnAxes');
@@ -490,6 +492,16 @@
       hud.textContent = '朝向镜像修正：' + (mirrorOn ? '开（跟随镜像后的画面）' : '关（按原始帧）') + ' · 已记住本机选择';
     });
     btnAxes.addEventListener('click', ev => { ev.stopPropagation(); showAxes = !showAxes; save('showAxes', showAxes ? '1' : '0'); paintBtn(); });
+    const btnAck = document.getElementById('btnAck');
+    const paintAck = () => { btnAck.textContent = '设备回读：' + (ackMode ? '开' : '关'); btnAck.style.opacity = ackMode ? 1 : .55; };
+    paintAck();
+    btnAck.addEventListener('click', ev => {
+      ev.stopPropagation();
+      ackMode = !ackMode; save('ackMode', ackMode ? '1' : '0'); paintAck();
+      hud.textContent = ackMode
+        ? '设备回读：开（等设备把同一字节回传才判成功）'
+        : '设备回读：关（设备固件没有回显时用；只能确认已发出，不能确认执行）';
+    });
     [{ id: 'sYaw', set: v => yawDeg = v }, { id: 'sPitch', set: v => pitchDeg = v }, { id: 'sRoll', set: v => rollDeg = v }].forEach(o => {
       const el = document.getElementById(o.id);
       el.value = ls(o.id, el.value); o.set(+el.value);
@@ -537,13 +549,23 @@
         return;
       }
       const my = ++ackToken;
+      if (!ackMode) {
+        // 设备固件没有回显：只确认"已写出"，不假装闭环
+        const ok = await bt.writeByte(fn.byte);
+        if (my !== ackToken) return;
+        fnEl.textContent = ok
+          ? '✔ 已发出 ' + hex(fn.byte) + '（' + fn.name + '）· 无回读模式：设备未回显，无法确认执行'
+          : '⚠️ 未发送 ' + hex(fn.byte) + '（' + fn.name + '）· 蓝牙没连上';
+        renderRx();
+        return;
+      }
       fnEl.textContent = '已触发：' + fn.name + ' · 发出 ' + hex(fn.byte) + ' … 等串口回读';
       const r = await bt.writeAndAck(fn.byte, 2000);
       if (my !== ackToken) return;
       if (!r.sent) { fnEl.textContent = '⚠️ 未发送 ' + hex(fn.byte) + '（' + fn.name + '）· 蓝牙没连上'; return; }
       if (r.ack == null) {
         fnEl.textContent = bt.notifyOk
-          ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内没收到回读 → 点下方回读窗看"自检"，能直接分辨是订阅没落到模块、还是系统不投递'
+          ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内没收到回读 → 若设备固件本身没有回显，请点“设备回读”关闭它；否则点下方回读窗看“自检”'
           : '⚠️ 已发 ' + hex(fn.byte) + '（' + fn.name + '），但这条特征不支持 Notify，读不到回读';
       } else if (r.match) {
         fnEl.textContent = '✅ 链路闭环：发出 ' + hex(fn.byte) + ' ＝ 回读 ' + hex(r.ack) + '（' + fn.name + '，经 ' + (r.src || bt.lastSrc || '?') + '）· ' + r.waited + 'ms';
