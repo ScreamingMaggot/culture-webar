@@ -46,10 +46,6 @@
                   border-radius: 50%; background: #6b7470; }
     #bt.on { color: var(--jade); border-color: rgba(99,216,163,.35); }
     #bt.on::before { background: var(--jade); box-shadow: 0 0 8px rgba(99,216,163,.8); }
-    #rx { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); z-index: 10;
-          font: 11.5px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; color: #a9c7d8;
-          background: rgba(9,13,14,.78); border: 1px solid var(--line); padding: 7px 10px; border-radius: var(--radius-s);
-          text-align: center; cursor: pointer; backdrop-filter: blur(8px); }
 
     #start { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
              padding: 24px; background:
@@ -145,7 +141,7 @@
             padding: 20px 18px 48px; white-space: pre-wrap; -webkit-overflow-scrolling: touch; }
     #diag .warn { color: var(--warn); } #diag .bad { color: var(--bad); } #diag .ok { color: var(--jade); }
 
-    body.table #hud, body.table #fn, body.table #rx, body.table #bt, body.table .palm-only { display: none !important; }
+    body.table #hud, body.table #fn, body.table #bt, body.table .palm-only { display: none !important; }
     body:not(.table) .table-only { display: none !important; }
     body:not(.table) #calib, body:not(.table) #bar, body:not(.table) #st { display: none !important; }
     body.table #bar { display: block; }
@@ -158,7 +154,6 @@
 
   <div id="hud">正在加载…</div>
   <div id="fn"></div>
-  <div id="rx">串口回读：（还没有数据）</div>
   <div id="diag"></div>
 
   <div id="start">
@@ -253,7 +248,6 @@
         <button id="btnFlip" class="btn small">翻转朝向</button>
         <button id="btnMirror" class="btn small">镜像修正</button>
         <button id="btnAxes" class="btn small">坐标轴</button>
-        <button id="btnAck" class="btn small">设备回读：开</button>
         <button id="btnDiag" class="btn small">蓝牙自检</button>
       </div>
     </div>
@@ -280,18 +274,17 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-    import { BleClient, hex } from './ble.js?v=L2026-10-21f';
-    import { RxBridge } from './rxbridge.js?v=L2026-10-21f';
-    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-21f';
-    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-21f';
-    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-21f';
+    import { BleClient, hex } from './ble.js?v=L2026-10-21g';
+        import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-21g';
+    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-21g';
+    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-21g';
 
-    const VER = 'L2026-10-21f';
+    const VER = 'L2026-10-21g';
     document.getElementById('ver').textContent = '版本 ' + VER;
     let MODE = 'palm';                                   // 'palm' | 'table'
 
     const hud = document.getElementById('hud'), fnEl = document.getElementById('fn');
-    const rxEl = document.getElementById('rx'), btEl = document.getElementById('bt');
+    const btEl = document.getElementById('bt');
     const diagEl = document.getElementById('diag');
     const stEl = document.getElementById('st'), modeEl = document.getElementById('mode');
     const setSt = (t, warn) => { stEl.textContent = t; stEl.classList.toggle('warn', !!warn); };
@@ -492,7 +485,6 @@
     let curHand = null, handPresent = false, prevNormal = null;
     let mirrorOn = ls('mirrorOn', '0') === '1';      // 实测：前置链路不做水平镜像
     let showAxes = ls('showAxes', '0') === '1';
-    let ackMode = ls('ackMode', '1') === '1';   // 设备固件是否回显；关掉则只确认"已发出"
     let yawDeg = 0, pitchDeg = 0, rollDeg = 270, moveTarget = null, created = false;
 
     const btnMirror = document.getElementById('btnMirror'), btnAxes = document.getElementById('btnAxes');
@@ -504,16 +496,6 @@
       hud.textContent = '朝向镜像修正：' + (mirrorOn ? '开（跟随镜像后的画面）' : '关（按原始帧）') + ' · 已记住本机选择';
     });
     btnAxes.addEventListener('click', ev => { ev.stopPropagation(); showAxes = !showAxes; save('showAxes', showAxes ? '1' : '0'); paintBtn(); });
-    const btnAck = document.getElementById('btnAck');
-    const paintAck = () => { btnAck.textContent = '设备回读：' + (ackMode ? '开' : '关'); btnAck.style.opacity = ackMode ? 1 : .55; };
-    paintAck();
-    btnAck.addEventListener('click', ev => {
-      ev.stopPropagation();
-      ackMode = !ackMode; save('ackMode', ackMode ? '1' : '0'); paintAck();
-      hud.textContent = ackMode
-        ? '设备回读：开（等设备把同一字节回传才判成功）'
-        : '设备回读：关（设备固件没有回显时用；只能确认已发出，不能确认执行）';
-    });
     [{ id: 'sYaw', set: v => yawDeg = v }, { id: 'sPitch', set: v => pitchDeg = v }, { id: 'sRoll', set: v => rollDeg = v }].forEach(o => {
       const el = document.getElementById(o.id);
       el.value = ls(o.id, el.value); o.set(+el.value);
@@ -549,68 +531,37 @@
 
     // 蓝牙
     const bt = new BleClient((t, ok) => { btEl.textContent = '蓝牙：' + t; btEl.classList.toggle('on', !!ok); });
+    bt.wantNotify = false;   // 本页以“已发送 + 看实物动作”为准，不订阅回读
     btEl.addEventListener('click', () => bt.connect());
     document.getElementById('goBT').addEventListener('click', async () => { if (await bt.connect()) document.getElementById('goBT').style.display = 'none'; });
     window.__bt = () => bt.info(); window.__ble = bt;
-    const bridge = new RxBridge(bytes => { const real = bytes.filter(b => b !== 0xB5); if (real.length) bt.feedExternal(real); });
-    bridge.start(150);
-    window.__bridge = () => bridge.st;
-    let ackToken = 0;
+    // 发送即判定：设备是否执行看“龙马有没有动作”，不再依赖回显/Notify
+    let fnSeq = 0;
     async function showFn(fn) {
       fnEl.style.display = 'block';
       if (fn.byte == null) {
-        fnEl.textContent = '⚠️ 未发送：' + fn.name + '还没有指令字节（只屏显）。' + (fn.key === 'dance' ? '跳舞默认是 0x09，' : '') + '请在上方“动作码”里填入后点“发送”。';
+        fnEl.textContent = '⚠️ 未发送：' + fn.name + '还没有指令字节（只屏显）。' + (fn.key === 'dance' ? '跳舞默认是 0x09，' : '') + '请在上方“手势动作”里填入后点“发送”。';
         const inp = document.querySelector('.bcmd[data-key="' + fn.key + '"]');
         if (inp) { inp.focus(); inp.style.borderColor = 'var(--warn)'; setTimeout(() => { inp.style.borderColor = ''; }, 2500); }
         return;
       }
-      const my = ++ackToken;
-      if (!ackMode) {
-        // 设备固件没有回显：只确认"已写出"，不假装闭环
-        const ok = await bt.writeByte(fn.byte);
-        if (my !== ackToken) return;
-        fnEl.textContent = ok
-          ? '✔ 已发出 ' + hex(fn.byte) + '（' + fn.name + '）· 无回读模式：设备未回显，无法确认执行'
-          : '⚠️ 未发送 ' + hex(fn.byte) + '（' + fn.name + '）· 蓝牙没连上';
-        renderRx();
-        return;
-      }
-      fnEl.textContent = '已触发：' + fn.name + ' · 发出 ' + hex(fn.byte) + ' … 等串口回读';
-      const r = await bt.writeAndAck(fn.byte, 2000);
-      if (my !== ackToken) return;
-      if (!r.sent) { fnEl.textContent = '⚠️ 未发送 ' + hex(fn.byte) + '（' + fn.name + '）· 蓝牙没连上'; return; }
-      if (r.ack == null) {
-        fnEl.textContent = bt.notifyOk
-          ? '❌ 已发 ' + hex(fn.byte) + '（' + fn.name + '），2 秒内没收到回读 → 若设备固件本身没有回显，请点“设备回读”关闭它；否则点下方回读窗看“自检”'
-          : '⚠️ 已发 ' + hex(fn.byte) + '（' + fn.name + '），但这条特征不支持 Notify，读不到回读';
-      } else if (r.match) {
-        fnEl.textContent = '✅ 链路闭环：发出 ' + hex(fn.byte) + ' ＝ 回读 ' + hex(r.ack) + '（' + fn.name + '，经 ' + (r.src || bt.lastSrc || '?') + '）· ' + r.waited + 'ms';
-      } else {
-        fnEl.textContent = '❌ 发出 ' + hex(fn.byte) + '（' + fn.name + '）但串口回读 ' + hex(r.ack) + ' → 不一致';
-      }
-      renderRx();
+      const my = ++fnSeq;
+      const ok = await bt.writeByte(fn.byte);
+      if (my !== fnSeq) return;
+      fnEl.textContent = ok
+        ? '✅ 已发送 ' + hex(fn.byte) + '（' + fn.name + '）· 看龙马是否动作确认通信'
+        : '⚠️ 未发送 ' + hex(fn.byte) + '（' + fn.name + '）· 蓝牙没连上';
     }
-    function renderRx() {
-      const a = bt.rx, n = bt.rxTotal;
-      if (!a.length) { rxEl.textContent = '串口回读：（还没有数据）  点此处＝自检，能看出蓝牙哪一环不通'; return; }
-      rxEl.textContent = '回读 共' + n + '字节 · 来源 ' + (bt.lastSrc || '—') + ' · '
-        + (bridge.st.ok ? '串口桥在线' : '串口桥未启动(仅Notify)') + '：' + a.slice(-14).map(hex).join(' ') + '（点此自检）';
-    }
-    bt.onRx = renderRx;
 
     // 自检
     const row = (k, v, cls) => '<span class="' + (cls || '') + '">' + k + '：' + v + '</span>\n';
     function verdict(d) {
       const out = [];
       const push = (cls, t) => out.push('<span class="' + cls + '">· ' + t + '</span>');
-      const nN = bt.srcCount['Notify'] || 0, nB = bt.srcCount['串口桥'] || 0;
       if (!d['本浏览器支持']) push('bad', '这个浏览器没有 Web Bluetooth（夸克、各类 App 内嵌 WebView 都不行）→ 换 Edge 或 Chrome。');
       else if (!d['已连接']) push('bad', '还没连上 BT24 → 点右上角"蓝牙"，在弹窗里选 BT24；列表里没有＝模块没在广播或被别的设备连着（BT24 只允许一条连接）。');
-      else if (!d['已订阅Notify']) push('bad', '没订阅上 Notify（特征能力里没有 notify，或系统拒了）→ 只能靠串口桥给判据。');
-      else if (d['CCC(0x2902)'].indexOf('没被打开') >= 0) push('bad', 'CCC 不是 01 → 订阅没落到模块上：手机"设置→应用→Edge→权限→附近的设备/蓝牙"授权后重连。');
-      else if (!nN) push('warn', 'CCC=01（模块端 notify 确实开了），但 Notify 一个字节都没交给浏览器 → 这一侧系统不投递。'
-        + (nB ? '串口桥已补上 ' + nB + ' 字节，判据照样成立（结论里来源显示"串口桥"）。' : '串口桥也没数据：先点自检下面的"桥"看是不是没连上 http 页面/桥没启动。'));
-      else push('ok', 'Notify 正常投递（' + nN + ' 字节）→ 回读走的是空中链路，闭环成立（串口桥另收 ' + nB + ' 字节）。');
+      else if (!d['特征能力'].includes('write')) push('bad', '这条特征不可写 → 指令发不出去，换 0xFFE1 或重连。');
+      else push('ok', '可写特征就绪 → 发送后看龙马是否动作，即可判断通信是否成功（本版不依赖回显）。');
       push('warn', '测手机前：电脑上那个蓝牙页面必须彻底关掉。BT24 一次只允许一条连接，两边抢连会出现"写进去没回读"这种半死状态。');
       return out.join('\n');
     }
@@ -634,12 +585,10 @@
       diagEl.innerHTML = h + '\n—— 判读 ——\n' + verdict(d) + '\n（点此处关闭）';
     }
     diagEl.addEventListener('click', () => { diagEl.style.display = 'none'; });
-    rxEl.addEventListener('click', runDiag);
     document.getElementById('btnDiag').addEventListener('click', ev => { ev.stopPropagation(); runDiag(); });
     document.getElementById('goDiag').addEventListener('click', runDiag);
     window.__diag = runDiag;
 
-    // 指令字节现场可改
     // ---- 指令列表（蓝牙可控）＋自定义 ----
     const CMDS = [
       { b: 0x02, name: '立正' }, { b: 0x03, name: '前进' }, { b: 0x04, name: '撤退' },
@@ -904,7 +853,7 @@
 
     // ---------- 点击：掌心（有限制）/ 桌面（逆单应） ----------
     window.addEventListener('pointerdown', ev => {
-      if (ev.target && ev.target.closest && ev.target.closest('#panel,#hud,#start,#bt,#rx,#diag,#bar,#calib')) return;
+      if (ev.target && ev.target.closest && ev.target.closest('#panel,#hud,#start,#bt,#diag,#bar,#calib')) return;
       if (MODE === 'palm') {
         if (!handPresent) { hud.textContent = '画面里还没有手 · 先张开手掌把龙马召出来，再点屏幕让它走'; return; }
         const r = renderer.domElement.getBoundingClientRect();
@@ -952,7 +901,6 @@
     function layoutOverlays() {
       const p = document.getElementById('panel');
       const base = (p && getComputedStyle(p).display !== 'none') ? p.offsetHeight + 24 : 12;
-      rxEl.style.bottom = base + 'px';
       fnEl.style.bottom = (base + 14) + 'px';
       const bar = document.getElementById('bar');
       if (bar && getComputedStyle(bar).display !== 'none') stEl.style.top = (bar.offsetHeight + 24) + 'px';

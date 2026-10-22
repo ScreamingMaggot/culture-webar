@@ -19,6 +19,7 @@ export class BleClient {
     this.notifyOk = false; // 是否成功订阅了 Notify（没订阅就永远等不到 ack）
     this.lastSrc = '—';       // 最近一次回读是从哪条通道来的：Notify / 串口桥
     this.srcCount = {};       // 每条通道各收到多少字节——手机上一旦"不确定是谁送的"，看这个数
+    this.wantNotify = true;   // 是否需要订阅回读；页面只凭"发出即成功"时可设为 false
     this.onRx = null;
   }
 
@@ -40,9 +41,9 @@ export class BleClient {
       this.ch = chars.find(c => isTarget(c) && writable(c)) || chars.find(writable) || chars[0];
       this.dev.addEventListener('gattserverdisconnected', () => { this.ch = null; this.notifyOk = false; this.s('已断开，点此处重连', false); });
       // 一连上就订阅 Notify：正式固件（talk.c 的 deal 分支）会把收到的字节原样回显，这就是 ack
-      await this.subscribe();
+      if (this.wantNotify) await this.subscribe();
       this.s('已连接 ' + this.name() + ' ✓ ' + svc.uuid.slice(4, 8) + '/' + this.ch.uuid.slice(4, 8)
-            + (this.notifyOk ? '（回读已订阅）' : '（无 Notify，拿不到回读）'), true);
+            + (this.wantNotify ? (this.notifyOk ? '（回读已订阅）' : '（无 Notify，拿不到回读）') : ''), true);
       return true;
     } catch (e) {
       this.ch = null;
