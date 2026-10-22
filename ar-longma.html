@@ -267,13 +267,13 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-    import { BleClient, hex } from './ble.js?v=L2026-10-20a';
-    import { RxBridge } from './rxbridge.js?v=L2026-10-20a';
-    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-20a';
-    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-20a';
-    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-20a';
+    import { BleClient, hex } from './ble.js?v=L2026-10-21c';
+    import { RxBridge } from './rxbridge.js?v=L2026-10-21c';
+    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-21c';
+    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-21c';
+    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-21c';
 
-    const VER = 'L2026-10-20a';
+    const VER = 'L2026-10-21c';
     document.getElementById('ver').textContent = '版本 ' + VER;
     let MODE = 'palm';                                   // 'palm' | 'table'
 
@@ -400,7 +400,14 @@
         } else {
           hud.textContent = '✅ 模型就绪（' + preset.name + '）：张开五指试试';
         }
-      }, (p) => { if (p && p.total) { const s = 'loading ' + Math.round(p.loaded / p.total * 100) + '%'; if (MODE === 'palm') hud.textContent = s; } },
+      }, (p) => {
+        // 进度夹在 0–100：某些服务器/Blob 的 total 与实际投递字节不一致（压缩传输、估算长度），
+        // loaded/total 会略大于 1，直接乘 100 会冒出 106% 这种数字。
+        const pct = (p && p.total > 0) ? Math.max(0, Math.min(100, Math.round(p.loaded / p.total * 100))) : null;
+        const txt = '模型加载中' + (pct != null ? ' ' + pct + '%' : (p && p.loaded ? '（' + (p.loaded / 1048576).toFixed(1) + ' MB）' : '…'))
+          + '：' + preset.name;
+        if (MODE === 'palm') hud.textContent = txt; else setSt(txt, true);
+      },
          (e) => {
            if (MODE === 'table') setSt('模型加载失败：' + ((e && e.message) || e) + '（检查网络后刷新）', true);
            else hud.textContent = '❌ 模型加载失败: ' + ((e && e.message) || e);
@@ -502,7 +509,14 @@
       'Victory':     { key: 'sing',    name: '唱歌', byte: null },
       'Closed_Fist': { key: 'science', name: '科普', byte: null }
     };
-    try { Object.values(FN).forEach(f => { const v = localStorage.getItem('fn' + f.key); if (v !== null) f.byte = v === '' ? null : parseInt(v, 16); }); } catch (e) {}
+    try {
+      Object.values(FN).forEach(f => {
+        const v = localStorage.getItem('fn' + f.key);
+        // 只接受非空的已存值；空串视为"没设过"，保留内置默认（跳舞 0x09）。
+        // 旧页面与合并页同源，localStorage 共用，之前清空过的字段会把默认值覆盖成空。
+        if (v) { const n = parseInt(v, 16); if (Number.isFinite(n)) f.byte = n; }
+      });
+    } catch (e) {}
     let fnHold = 0, fnName = '';
 
     // 蓝牙
@@ -516,7 +530,12 @@
     let ackToken = 0;
     async function showFn(fn) {
       fnEl.style.display = 'block';
-      if (fn.byte == null) { fnEl.textContent = '已触发：' + fn.name + ' · 还没给指令字节（只屏显，不发送）'; return; }
+      if (fn.byte == null) {
+        fnEl.textContent = '⚠️ 未发送：' + fn.name + '还没有指令字节（只屏显）。' + (fn.key === 'dance' ? '跳舞默认是 0x09，' : '') + '请在上方“动作码”里填入后点“发送”。';
+        const inp = document.querySelector('.bcmd[data-key="' + fn.key + '"]');
+        if (inp) { inp.focus(); inp.style.borderColor = 'var(--warn)'; setTimeout(() => { inp.style.borderColor = ''; }, 2500); }
+        return;
+      }
       const my = ++ackToken;
       fnEl.textContent = '已触发：' + fn.name + ' · 发出 ' + hex(fn.byte) + ' … 等串口回读';
       const r = await bt.writeAndAck(fn.byte, 2000);
@@ -611,13 +630,26 @@
     async function startPalm(stream) {
       const video = document.getElementById('v');
       camera.position.set(0, 0, 1); camera.lookAt(0, 0, 0); camera.fov = 60; camera.updateProjectionMatrix();
-      hud.textContent = '加载手势模型…';
-      const { GestureRecognizer, FilesetResolver } = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
-      const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
+      hud.textContent = '加载手势模型…（' + (window.__cam || '摄像头') + '）';
+      // 手势运行时从公共 CDN 取：jsDelivr 不通就换 unpkg；两边都失败就把原因写在屏上，不再静默
+      const BASES = ['https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14', 'https://unpkg.com/@mediapipe/tasks-vision@0.10.14'];
       const modelPath = 'https://storage.googleapis.com/mediapipe-models/gesture_recognizer/gesture_recognizer/float16/1/gesture_recognizer.task';
-      let gr; try { gr = await GestureRecognizer.createFromOptions(vision, { baseOptions: { modelAssetPath: modelPath, delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 1 }); }
-      catch (e) { gr = await GestureRecognizer.createFromOptions(vision, { baseOptions: { modelAssetPath: modelPath }, runningMode: 'VIDEO', numHands: 1 }); }
-      hud.textContent = '张开五指，让龙马站到掌心';
+      let gr = null, lastErr = null;
+      for (const base of BASES) {
+        try {
+          const { GestureRecognizer, FilesetResolver } = await import(base);
+          const vision = await FilesetResolver.forVisionTasks(base + '/wasm');
+          try { gr = await GestureRecognizer.createFromOptions(vision, { baseOptions: { modelAssetPath: modelPath, delegate: 'GPU' }, runningMode: 'VIDEO', numHands: 1 }); }
+          catch (e) { gr = await GestureRecognizer.createFromOptions(vision, { baseOptions: { modelAssetPath: modelPath }, runningMode: 'VIDEO', numHands: 1 }); }
+          break;
+        } catch (e) { lastErr = e; }
+      }
+      if (!gr) {
+        hud.textContent = '❌ 手势模型加载失败：' + ((lastErr && (lastErr.name + ' ' + lastErr.message)) || '未知错误')
+          + ' · 检查网络/加速器是否拦了 cdn.jsdelivr.net 与 storage.googleapis.com';
+        return;
+      }
+      hud.textContent = '张开五指，让龙马站到掌心（' + (window.__cam || '摄像头') + '）';
       let lastT = -1;
       (function loop() {
         requestAnimationFrame(loop);
@@ -809,19 +841,19 @@
       setCollapsed(ls('panelCollapsed_' + mode, '1') === '1');
       layoutOverlays();
       const mc = document.getElementById('modeChip'); if (mc) mc.textContent = (mode === 'table') ? '桌面' : '掌心';
-      // 自动选摄像头：掌心用前置、桌面用后置；用户手动选过则尊重
-      if (sel.value === AUTO || !sel.value) {
-        try {
-          const d = (await navigator.mediaDevices.enumerateDevices()).filter(x => x.kind === 'videoinput');
-          d.sort((a, b) => scoreFor(b, mode) - scoreFor(a, mode));
-          if (d[0]) sel.value = d[0].deviceId;
-        } catch (e) {}
-      }
-      chosenDevice = sel.value;
+      // 摄像头：下拉里明确选了设备就尊重；否则按模式用 facingMode（掌心前置、桌面后置），
+      // 不再依赖 enumerateDevices 的顺序（手机在授权前拿不到标签，顺序常常是后置在前）。
       let stream;
-      try { stream = await md.getUserMedia({ video: true }); }
-      catch (e) { alert('摄像头失败 ' + e.name); MODE = 'palm'; document.body.classList.remove('table'); return; }
+      const picked = (sel.value && sel.value !== AUTO) ? { deviceId: { exact: sel.value } } : { facingMode: (mode === 'palm') ? 'user' : 'environment' };
+      try { stream = await origGum({ video: picked }); }
+      catch (e) {
+        alert('摄像头失败 ' + e.name + '（' + (e.message || '') + '）');
+        MODE = 'palm'; document.body.classList.remove('table'); return;
+      }
+      chosenDevice = null;
       const video = document.getElementById('v'); video.srcObject = stream; await video.play().catch(() => {});
+      const camLabel = (stream.getVideoTracks()[0] && stream.getVideoTracks()[0].label) || '未知摄像头';
+      window.__cam = camLabel;
       document.getElementById('start').style.display = 'none';
       document.getElementById('panel').style.display = 'block';
       layoutOverlays();
@@ -890,6 +922,17 @@
       }
     }
 
+    const reportErr = (msg) => {
+      if (MODE === 'table') setSt('❌ ' + msg, true);
+      else hud.textContent = '❌ ' + msg;
+    };
+    addEventListener('unhandledrejection', e => {
+      const r = e.reason || {};
+      reportErr('运行错误：' + (r.name || '') + ' ' + (r.message || r));
+    });
+    addEventListener('error', e => { if (e && e.message) reportErr('脚本错误：' + e.message); });
+
+    window.__fn = () => Object.fromEntries(Object.values(FN).map(f => [f.key, f.byte]));
     window.__horse = horse;
     window.__loadModel = loadModel;
     window.__setMode = m => { MODE = m; document.body.classList.toggle('table', m === 'table'); };   // 离线自检用
