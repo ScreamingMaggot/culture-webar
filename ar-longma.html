@@ -109,6 +109,13 @@
     .bsend:hover { background: rgba(99,216,163,.22); }
     .tools .btn { flex: 1 1 auto; }
     .hintline { color: var(--muted); font-size: 12px; }
+    .cmd-list { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 auto; }
+    .cmdchip { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 5px 11px;
+               border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.04);
+               color: var(--text); font-size: 12px; cursor: pointer; transition: border-color .15s, background .15s; }
+    .cmdchip:hover { border-color: rgba(99,216,163,.45); background: var(--jade-dim); }
+    .cmdchip small { color: var(--muted); font: 11px ui-monospace, Consolas, monospace; }
+    .cmdchip .x { color: var(--bad); font-size: 13px; line-height: 1; padding: 0 2px; }
     #panel.collapsed { padding-bottom: 10px; }
     #panel.collapsed #sheetBody { display: none; }
     #panel.collapsed .sheet-head { border-bottom: 0; margin-bottom: 0; padding-bottom: 0; }
@@ -232,12 +239,16 @@
         <label class="slider"><span>掌轴</span><input id="sRoll" type="range" min="0" max="360" step="15" value="270"><output id="oSRoll">270°</output></label>
       </div>
       <div class="row" id="cmdrow">
-        <span class="row-label">动作码</span>
+        <span class="row-label">手势动作</span>
         <label class="cmd">跳舞<input class="bcmd" id="bDance" data-key="dance" maxlength="2" size="2"><button class="bsend" data-key="dance">发送</button></label>
         <label class="cmd">前进<input class="bcmd" id="bWalk" data-key="walk" maxlength="2" size="2"><button class="bsend" data-key="walk">发送</button></label>
         <label class="cmd">呼吸灯<input class="bcmd" id="bLight" data-key="light" maxlength="2" size="2"><button class="bsend" data-key="light">发送</button></label>
       </div>
-      <div class="row hintline" style="margin-top:6px">指令表：02 立正 · 03 前进 · 04 撤退 · 05 握手 · 09 跳舞 · 0A 趴下 · 0B 蹲下 · 0C 摇尾巴 · 0F 呼吸灯 · 10 充能 · 11 关灯（方框里可直接改成任意值）</div>
+      <div class="row cmds">
+        <span class="row-label">指令</span>
+        <div id="cmdList" class="cmd-list"></div>
+        <button id="cmdAdd" class="btn small">＋ 自定义</button>
+      </div>
       <div class="row tools">
         <button id="btnFlip" class="btn small">翻转朝向</button>
         <button id="btnMirror" class="btn small">镜像修正</button>
@@ -269,13 +280,13 @@
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
-    import { BleClient, hex } from './ble.js?v=L2026-10-21e';
-    import { RxBridge } from './rxbridge.js?v=L2026-10-21e';
-    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-21e';
-    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-21e';
-    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-21e';
+    import { BleClient, hex } from './ble.js?v=L2026-10-21f';
+    import { RxBridge } from './rxbridge.js?v=L2026-10-21f';
+    import { palmBasis, toDisplay, HS_DEFAULT } from './palmframe.js?v=L2026-10-21f';
+    import { MODELS, a19Columns, standColumns } from './models.js?v=L2026-10-21f';
+    import { homography, poseFromHomography, rectCorners, inv3, applyH } from './tablepose.js?v=L2026-10-21f';
 
-    const VER = 'L2026-10-21e';
+    const VER = 'L2026-10-21f';
     document.getElementById('ver').textContent = '版本 ' + VER;
     let MODE = 'palm';                                   // 'palm' | 'table'
 
@@ -629,6 +640,51 @@
     window.__diag = runDiag;
 
     // 指令字节现场可改
+    // ---- 指令列表（蓝牙可控）＋自定义 ----
+    const CMDS = [
+      { b: 0x02, name: '立正' }, { b: 0x03, name: '前进' }, { b: 0x04, name: '撤退' },
+      { b: 0x05, name: '握手' }, { b: 0x09, name: '跳舞' }, { b: 0x0A, name: '趴下' },
+      { b: 0x0B, name: '蹲下' }, { b: 0x0C, name: '摇尾巴' }, { b: 0x0F, name: '呼吸灯' },
+      { b: 0x10, name: '充能' }, { b: 0x11, name: '关灯' }
+    ];
+    let customCmds = [];
+    try { customCmds = (JSON.parse(localStorage.getItem('cmdsCustomV1') || '[]') || []).map(c => ({ ...c, custom: true })); } catch (e) { customCmds = []; }
+    const cmdList = document.getElementById('cmdList');
+    const saveCmds = () => { try { localStorage.setItem('cmdsCustomV1', JSON.stringify(customCmds.map(({ name, b }) => ({ name, b })))); } catch (e) {} };
+    function renderCmds() {
+      cmdList.replaceChildren();
+      for (const c of CMDS.concat(customCmds)) {
+        const chip = document.createElement('button');
+        chip.type = 'button'; chip.className = 'cmdchip';
+        chip.appendChild(document.createTextNode(c.name));
+        const code = document.createElement('small');
+        code.textContent = '0x' + c.b.toString(16).toUpperCase().padStart(2, '0');
+        chip.appendChild(code);
+        if (c.custom) {
+          const x = document.createElement('span'); x.className = 'x'; x.textContent = '×';
+          x.addEventListener('click', ev => {
+            ev.stopPropagation();
+            if (confirm('删除“' + c.name + '”？')) { customCmds = customCmds.filter(k => k !== c); saveCmds(); renderCmds(); }
+          });
+          chip.appendChild(x);
+        }
+        chip.addEventListener('click', ev => { ev.stopPropagation(); showFn({ name: c.name, byte: c.b, key: 'cmd' }); });
+        cmdList.appendChild(chip);
+      }
+    }
+    document.getElementById('cmdAdd').addEventListener('click', ev => {
+      ev.stopPropagation();
+      const name = (prompt('功能名称（如：作揖）') || '').trim();
+      if (!name) return;
+      const hex = (prompt('指令字节（十六进制 1–2 位，如 0D）') || '').replace(/[^0-9a-fA-F]/g, '');
+      const n = parseInt(hex, 16);
+      if (!hex || !Number.isFinite(n) || n > 255) { alert('不是有效的十六进制字节'); return; }
+      if (n === 0x71) { alert('0x71 会关掉蓝牙，不能加入'); return; }
+      customCmds.push({ name: name.slice(0, 8), b: n, custom: true });
+      saveCmds(); renderCmds();
+    });
+    renderCmds();
+
     const FN_BY_KEY = {}; Object.values(FN).forEach(f => { FN_BY_KEY[f.key] = f; });
     const toHex = b => b.toString(16).toUpperCase().padStart(2, '0');
     document.querySelectorAll('.bcmd').forEach(inp => {
